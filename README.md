@@ -2,7 +2,7 @@
 
 The people app of the citrus family, split out of Citrus Maxima on 16/11/2026. Clementine owns every contact card and everything social:
 
-- **Today**: the faces free with you today, each in a ring that lights up for how much of the day you are both free. This week at a glance: your shift each day and who is free with you. Plans coming up, "did it happen?", reminders (birthdays and other dates, money owed, friends you have not been in touch with), open polls, the best times. One tap to plan a meet-up, log a call, log an outing, share your free time, or find a day.
+- **Today**: the faces you choose (free with you today, favourites, or only people you pin; free soonest, most time together, most overdue, name, or your own order; Always / Auto / Never per person, and hide for today), each in a ring that lights up for how much of the day you are both free. The cards under it come in your order (Settings › Customise › Today). Earlier wording: the faces free with you today, each in a ring that lights up for how much of the day you are both free. This week at a glance: your shift each day and who is free with you. Plans coming up, "did it happen?", reminders (birthdays and other dates, money owed, friends you have not been in touch with), open polls, the best times. One tap to plan a meet-up, log a call, log an outing, share your free time, or find a day.
 - **Free**: the who-is-free grid for friends, family or colleagues, a day sheet with everyone on one timeline, and **Find a day** for any mix of friends, family, colleagues and nurses.
 - **People**: friends and family as rows. Tap one for their **profile**: reach them, when you are free together, their dates, gift ideas, money between you, notes, and everything you did together. Also: every colleague in the roster with their contact card, a birthdays-and-dates calendar, and saved groups.
 - **Outings**: plans coming up, money (who owes whom from shared bills, settle up), your year (meet-ups per month, who you saw most, favourite spots), the history, and calls and messages.
@@ -23,6 +23,10 @@ One Google Drive tree for every app (see `HUB.md` in Citrus). Clementine writes 
 Clementine **reads** only `hub/mandarin/shifts.json` (your days, the roster by rota key, the GP legend) and, once, `hub/citrus/state.json` to bring friends, contact cards, outings, polls, the wishlist, treats and the Social timing over (with Undo).
 
 Deep links: `…/Clementine/?from=citrus&do=today|free|find|invite|log|call|share|outings|birthdays|people|colleagues|groups|plans|poll|add`.
+
+Faces: initials, an emoji, a character you build (shape, eyes, mouth, something on top — leaf, bow, cap, ghutra, hijab, crown, headphones, curls), or a photo (cropped and shrunk on the device, kept only in Clementine's own state.json), with a ring colour of your choice. Your own face shows on Today.
+
+Look (synced): accent (clementine, peach, berry, lime, sky, grape), bubbly or classic shapes, comfy or compact, celebrations on or off.
 
 Design: the citrus family's Manrope and Arcade / Clean / Paper interfaces, in Clementine's own palette (plum-ink, clementine, pith, leaf), Bricolage Grotesque for headings, and the segmented avatar ring (one hue per person).
 

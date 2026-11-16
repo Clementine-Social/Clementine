@@ -23,10 +23,10 @@ const at = Date.parse('2026-11-10T10:00:00Z');
 export const state = {
   app: 'clementine', version: 1, updatedAt: at,
   friends: {
-    fa: { id: 'fa', name: 'Ann Able', nick: 'Annie', kind: 'gp', rotaKey: 'id:2', phone: '0555000111', whatsapp: '', snap: 'ann.a', insta: 'ann_a', birthday: '11-18', every: 14, notes: 'Likes ramen', sched: {}, weeklyOff: [], hours: {}, fav: true, createdAt: at - 9e9, at },
-    fn: { id: 'fn', name: 'Nina Nurse', nick: '', kind: 'nurse', rotaKey: 'name:nina nurse', phone: '0555000222', whatsapp: '', snap: '', insta: '', birthday: '', every: 30, notes: '', sched: { [d(19)]: 'off' }, weeklyOff: [], hours: {}, fav: false, createdAt: at - 9e9, at },
+    fa: { id: 'fa', name: 'Ann Able', nick: 'Annie', kind: 'gp', rotaKey: 'id:2', phone: '0555000111', whatsapp: '', snap: 'ann.a', insta: 'ann_a', avatar: { type: 'char', char: { body: 'round', eyes: 'sparkle', mouth: 'grin', top: 'hijab' }, hue: 300 }, birthday: '11-18', every: 14, notes: 'Likes ramen', sched: {}, weeklyOff: [], hours: {}, fav: true, createdAt: at - 9e9, at },
+    fn: { id: 'fn', name: 'Nina Nurse', nick: '', kind: 'nurse', rotaKey: 'name:nina nurse', avatar: { type: 'emoji', emoji: '🦊' }, onToday: 'always', phone: '0555000222', whatsapp: '', snap: '', insta: '', birthday: '', every: 30, notes: '', sched: { [d(19)]: 'off' }, weeklyOff: [], hours: {}, fav: false, createdAt: at - 9e9, at },
     fz: { id: 'fz', name: 'Zed Zane', nick: '', kind: 'family', rotaKey: '', phone: '+971501234567', whatsapp: '', snap: '', insta: '', birthday: '1990-11-16', every: 7, notes: '', dates: [{ label: 'Wedding anniversary', date: '2018-11-24' }], gifts: [{ id: 'gg1', text: 'Coffee grinder', done: '' }], sched: {}, weeklyOff: [5, 6], hours: {}, fav: false, createdAt: at - 9e9, at },
-    fq: { id: 'fq', name: 'Quinn Quiet', nick: 'Q', kind: 'other', rotaKey: '', phone: '', whatsapp: '', snap: '', insta: '', birthday: '', every: 21, notes: '', sched: {}, weeklyOff: [], hours: {}, fav: false, createdAt: at - 9e9, at },
+    fq: { id: 'fq', name: 'Quinn Quiet', nick: 'Q', kind: 'other', onToday: 'never', avatar: { type: 'char', char: { body: 'cloud', eyes: 'glasses', mouth: 'cat', top: 'ghutra' } }, rotaKey: '', phone: '', whatsapp: '', snap: '', insta: '', birthday: '', every: 21, notes: '', sched: {}, weeklyOff: [], hours: {}, fav: false, createdAt: at - 9e9, at },
   },
   contacts: { 'id:3': { key: 'id:3', name: 'Dr Bo Bright', phone: '0566000333', snap: 'bo.b', note: 'FSED lead', birthday: '11-20', at } },
   groups: { g1: { id: 'g1', name: 'Work friends', icon: '🩺', members: ['fa', 'fn'], at } },

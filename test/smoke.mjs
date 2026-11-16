@@ -39,10 +39,13 @@ for (const [w, hgt, time] of [[390, 844, '2026-11-16T09:30:00+03:00'], [320, 640
   await sheetCheck(() => p.click('#view-people .fr-row >> nth=0'), 'profile');
   await p.click('#view-people .fr-row >> nth=0'); await sleep(400); await p.click('.sheet .pf-acts button:has-text("Edit")'); await sleep(400);
   await clean(p, '.sheet', 'friend editor'); await p.screenshot({ path: `${shots}/${w}-friend-editor.png` }); await p.keyboard.press('Escape'); await sleep(350);
+  await sheetCheck(async () => { await p.click('#view-people .fr-row >> nth=0'); await sleep(400); await p.click('.sheet .pf-face'); }, 'face editor');
+  for (const t of ['Character', 'Emoji', 'Photo']) { await p.click('#view-people .fr-row >> nth=0'); await sleep(400); await p.click('.sheet .pf-face'); await sleep(400); await p.click(`.sheet .av-tabs button:has-text("${t}")`); await sleep(250); await clean(p, '.sheet', `face editor › ${t}`); await p.screenshot({ path: `${shots}/${w}-face-${t}.png` }); await p.keyboard.press('Escape'); await sleep(350); }
   await p.click('nav.tabs button[data-view=today]'); await sleep(200);
+  await sheetCheck(() => p.click('#view-today .td-face >> nth=0'), 'face menu');
+  await sheetCheck(() => p.click('#view-today .td-hero-top button:has-text("Edit")'), 'faces on Today');
   await sheetCheck(() => p.click('#view-today .td-acts button:has-text("Log a call")'), 'log a call');
   await sheetCheck(() => p.click('#view-today .td-acts button:has-text("Share my free time")'), 'share free time');
-  await sheetCheck(() => p.click('#view-today .td-face >> nth=0'), 'invite from a face').catch(() => {});
   await p.click('nav.tabs button[data-view=outings]'); await sleep(200);
   await sheetCheck(() => p.click('#view-outings .item.clickable >> nth=0'), 'outing sheet');
   await sheetCheck(() => p.click('#view-outings button:has-text("Settle up") >> nth=0'), 'settle up');
@@ -52,6 +55,11 @@ for (const [w, hgt, time] of [[390, 844, '2026-11-16T09:30:00+03:00'], [320, 640
   await p.click('nav.tabs button[data-view=plans]'); await sleep(150);
   await sheetCheck(() => p.click('#view-plans button:has-text("New poll")'), 'new poll');
   await sheetCheck(() => p.click('#btnSearch'), 'search').catch(() => {});
+  await p.keyboard.press('Escape'); await sleep(350);
+  // the Today face rules hold on screen: Q is set to Never, Nina to Always
+  await p.click('nav.tabs button[data-view=today]'); await sleep(250);
+  const facesTxt = await p.locator('#view-today .td-faces').innerText().catch(() => '');
+  check(!/\bQ\b/.test(facesTxt) && /Nina/.test(facesTxt), `Today faces follow Always / Never (${facesTxt.replace(/\n/g, ' ').slice(0, 60)})`);
   check(!errors.length, `no page errors${errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''}`);
   await ctx.close();
 }

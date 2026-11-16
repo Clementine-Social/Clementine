@@ -129,6 +129,25 @@ check(!r2.groups.gz.members.includes('fz'), '…and groups');
 check(r2.outings.op.gone?.fz === 'Zed' && F.nameOn(r2, r2.outings.op, 'fz') === 'Zed' && r2.touches.tz.gone.fz === 'Zed', 'past outings and calls keep their name');
 check(r2.deleted['friend:fz'], 'a tombstone so the removal holds on other devices');
 
+console.log('faces on Today, avatars');
+let tf = F.addFriend(s, { id: 'fp', name: 'Pinned Pal', onToday: 'always' }); tf = F.updateFriend(tf, 'fa', { onToday: 'never' });
+const fz = F.todayFaces(tf, new Date(2026, 10, 20), { now: NOW, cfg: CZ.custom(tf).today });
+check(fz.some(x => x.f.id === 'fp' && !x.window) && !fz.some(x => x.f.id === 'fa'), 'Always shows even when not free; Never never shows');
+check(fz.findIndex(x => x.window) < fz.findIndex(x => !x.window), 'free people come before pinned-but-busy ones');
+const hid = F.todayFaces(tf, new Date(2026, 10, 20), { now: NOW, cfg: { ...CZ.custom(tf).today, hidden: { date: d(20), ids: ['fp'] } } });
+check(!hid.some(x => x.f.id === 'fp'), 'hidden for today');
+const favs = F.todayFaces(tf, new Date(2026, 10, 20), { now: NOW, cfg: { ...CZ.custom(tf).today, show: 'pinned' } });
+check(favs.every(x => x.pinned), 'show only pinned');
+const man = F.todayFaces(tf, new Date(2026, 10, 20), { now: NOW, cfg: { ...CZ.custom(tf).today, show: 'favs', sort: 'manual', order: ['fp', 'fz'] } });
+check(man[0]?.f.id === 'fp', 'my own order');
+check(CZ.custom({ settings: { custom: { today: { max: 999, show: 'x', sections: { order: ['polls', 'zzz'] } }, look: { accent: 'neon', fun: false } } } }).today.max === 40 && CZ.custom({ settings: { custom: { today: { sections: { order: ['polls'] } } } } }).today.sections.order[0] === 'polls', 'Today settings are cleaned and complete');
+check(CZ.custom({ settings: { custom: { look: { accent: 'neon', fun: false } } } }).look.accent === 'clementine' && CZ.custom({ settings: { custom: { look: { fun: false } } } }).look.fun === false, 'look settings are cleaned');
+check(F.cleanAvatar({ type: 'photo', photo: 'data:image/webp;base64,AAAA' })?.type === 'photo' && !F.cleanAvatar({ type: 'photo', photo: 'https://x/y.png' }) && !F.cleanAvatar({ type: 'photo', photo: 'data:image/webp;base64,' + 'A'.repeat(70000) }), 'only small inline photos are kept');
+check(F.cleanAvatar({ type: 'emoji', emoji: '🦊' }).emoji === '🦊' && !F.cleanAvatar({ type: 'emoji', emoji: 'way too long text' }), 'emoji faces');
+check(F.cleanAvatar({ type: 'char', char: { top: 'ghutra', eyes: 'nope' } }).char.eyes === 'dot', 'characters keep only known parts');
+check(F.updateFriend(s, 'fa', { name: 'Ann' }).friends.fa.avatar === s.friends.fa.avatar, 'editing a friend keeps their face');
+check(!HUB.buildContacts(F.updateFriend(s, 'fa', { avatar: { type: 'photo', photo: 'data:image/webp;base64,AAAA' } })).friends.fa?.avatar, 'photos never go into contacts.json');
+
 console.log('hub files');
 const st = HUB.buildStatus(s, NOW);
 check(st.app === 'clementine' && st.contract === 2 && /Zed's birthday today/.test(st.summary), `summary: ${st.summary}`);

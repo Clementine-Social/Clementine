@@ -62,12 +62,24 @@ const cleanSched = (o, now = new Date()) => { const out = {}, cut = keyOf(addDay
 /** Other dates worth remembering for a person (anniversary, their child's birthday, a graduation): [{label, date}] with MM-DD or YYYY-MM-DD. */
 const cleanDates = (l) => (Array.isArray(l) ? l : []).map(d => ({ label: String(d?.label || '').trim().slice(0, 30), date: parseBirthday(d?.date) })).filter(d => d.label && d.date).slice(0, 8);
 /** Gift ideas: [{id, text, done}] — done is the date it was given ('' while it is still an idea). */
+/** How a face looks: initials (default), an emoji, a built-in character, or a small photo (a data URL made on this device).
+ *  `hue` overrides the colour picked from the name. Anything else is dropped. */
+export const CHAR_PARTS = { body: ['round', 'bean', 'drop', 'citrus', 'cloud'], eyes: ['dot', 'happy', 'sleepy', 'wink', 'glasses', 'sparkle'], mouth: ['smile', 'grin', 'o', 'cat', 'flat', 'tongue'], top: ['none', 'leaf', 'bow', 'cap', 'ghutra', 'hijab', 'crown', 'headphones', 'curls'] };
+const PHOTO = /^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/=]+$/;
+export function cleanAvatar(a) {
+  if (!a || typeof a !== 'object') return null;
+  const hue = Number.isFinite(+a.hue) && a.hue !== null && a.hue !== '' ? Math.round(((+a.hue % 360) + 360) % 360) : null, base = hue != null ? { hue } : {};
+  if (a.type === 'photo' && typeof a.photo === 'string' && a.photo.length <= 60000 && PHOTO.test(a.photo)) return { type: 'photo', photo: a.photo, ...base };
+  if (a.type === 'emoji' && typeof a.emoji === 'string' && a.emoji.trim() && [...a.emoji.trim()].length <= 4) return { type: 'emoji', emoji: a.emoji.trim(), ...base };
+  if (a.type === 'char' && a.char && typeof a.char === 'object') { const c = {}; for (const [k, l] of Object.entries(CHAR_PARTS)) c[k] = l.includes(a.char[k]) ? a.char[k] : l[0]; return { type: 'char', char: c, ...base }; }
+  return hue != null ? { type: 'initials', ...base } : null;
+}
 const cleanGifts = (l) => (Array.isArray(l) ? l : []).map(g => ({ id: String(g?.id || 'g' + Math.random().toString(36).slice(2, 8)).slice(0, 20), text: String(g?.text || '').trim().slice(0, 80), done: /^\d{4}-\d\d-\d\d$/.test(g?.done || '') ? g.done : '' })).filter(g => g.text).slice(0, 30);
 export function addFriend(s, f) {
   const name = String(f.name || '').trim().slice(0, 60); if (!name) return s; const id = f.id || uid();
   const fr = { id, name, nick: String(f.nick || '').slice(0, 30), kind: KIND_IDS.includes(f.kind) ? f.kind : 'other', phone: asciiDigits(f.phone || '').slice(0, 24), whatsapp: asciiDigits(f.whatsapp || '').slice(0, 24), snap: cleanHandle(f.snap), insta: cleanHandle(f.insta),
     rotaKey: /^(id|name):/.test(f.rotaKey || '') ? f.rotaKey : '', place: String(f.place || '').slice(0, 60), birthday: parseBirthday(f.birthday), every: Math.max(0, Math.min(365, +f.every || 0)), notes: String(f.notes || '').slice(0, 500),
-    sched: cleanSched(f.sched), dates: cleanDates(f.dates), gifts: cleanGifts(f.gifts), weeklyOff: Array.isArray(f.weeklyOff) ? [...new Set(f.weeklyOff.map(Number).filter(n => n >= 0 && n <= 6))] : [], hours: cleanHours(f.hours), fav: !!f.fav, createdAt: f.createdAt || Date.now(), at: Date.now() };
+    sched: cleanSched(f.sched), avatar: cleanAvatar(f.avatar), onToday: ['always', 'never'].includes(f.onToday) ? f.onToday : 'auto', dates: cleanDates(f.dates), gifts: cleanGifts(f.gifts), weeklyOff: Array.isArray(f.weeklyOff) ? [...new Set(f.weeklyOff.map(Number).filter(n => n >= 0 && n <= 6))] : [], hours: cleanHours(f.hours), fav: !!f.fav, createdAt: f.createdAt || Date.now(), at: Date.now() };
   const s2 = { ...s, friends: { ...(s.friends || {}), [id]: fr } };
   // a colleague who becomes a friend: their friend record is now their card, so the separate card goes (with a tombstone)
   if (fr.rotaKey && s2.contacts?.[fr.rotaKey]) { const contacts = { ...s2.contacts }; delete contacts[fr.rotaKey]; return { ...s2, contacts, deleted: { ...(s2.deleted || {}), [`contact:${fr.rotaKey}`]: Date.now() } }; }
@@ -381,6 +393,22 @@ export function commonFree(s, people, { from = null, days = 21, withMe = true, m
     out.push({ date, key: keyOf(date), all: !!w && !missing.length && !unknown.length && free.length === people.length, me: true, window: w, windows: win, free, missing, unknown: unknown.map(x => x.p), weekend: [5, 6].includes(date.getDay()), dayLong });
   }
   return out;
+}
+/** The faces row on Today, as you set it up: who shows (free today, favourites, or only the people you pin), in which order,
+ *  how many. People set to "Always" show even when busy (window null); "Never", and anyone hidden for today, never do.
+ *  → [{f, window|null, frac (share of your day you are both free), overdue}] */
+export function todayFaces(s, date, { busy = [], now = new Date(), cfg = {} } = {}) {
+  const k = keyOf(date), hiddenToday = cfg.hidden?.date === k ? new Set(cfg.hidden.ids) : new Set();
+  const mine = clipToNow(myWindows(s, date, busy), date, now), span = Math.max(1, LATE - WAKE);
+  let list = friendList(s).filter(f => f.onToday !== 'never' && !hiddenToday.has(f.id)).map(f => {
+    const w = mine.length ? intersect(mine, dayState(s, f, date).windows).sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]))[0] || null : null;
+    return { f, window: w, frac: w ? (w[1] - w[0]) / span : 0, overdue: overdue(s, f, now), pinned: f.onToday === 'always' };
+  });
+  const show = cfg.show || 'free';
+  list = list.filter(x => x.pinned || (show === 'free' ? !!x.window : show === 'favs' ? x.f.fav : false));
+  const order = cfg.order || [], pos = (x) => { const i = order.indexOf(x.f.id); return i < 0 ? 1e6 : i; };
+  const by = { free: (a, b) => (a.window ? a.window[0] : 1e5) - (b.window ? b.window[0] : 1e5), longest: (a, b) => b.frac - a.frac, overdue: (a, b) => b.overdue - a.overdue, name: (a, b) => shortName(a.f).localeCompare(shortName(b.f)), manual: (a, b) => pos(a) - pos(b) }[cfg.sort || 'free'] || (() => 0);
+  return list.sort((a, b) => (cfg.sort === 'manual' ? 0 : (!!b.window - !!a.window)) || by(a, b) || shortName(a.f).localeCompare(shortName(b.f))).slice(0, cfg.max || 12);
 }
 /** Friends you could see on a day (free with you for at least the shortest meet-up), most overdue first. */
 export function freeWith(s, date, { busy = [], now = new Date() } = {}) {

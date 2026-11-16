@@ -4,6 +4,7 @@ import { h, toast, keyOf, fromKey, addDays, startOfDay, relDay, DAY_SHORT, MONTH
 import * as F from './social.js';
 import * as R from './roster.js';
 import * as SU from './social-ui.js';
+import * as AV from './avatar.js';
 
 let ctx = null;
 export function initPerson(c) { ctx = c; }
@@ -16,17 +17,23 @@ const money = (n) => `${Math.round(Math.abs(n) * 100) / 100} SAR`;
 // Each person keeps one hue (from their name), so the same face reads the same in every list. When `frac` is given the lit
 // segments show it (on Today: how much of the day you are both free); without it the ring is a quiet outline in their hue.
 const HUES = [14, 36, 142, 176, 204, 252, 292, 338];
+/** A person's hue: the one they picked, else one from their name. */
+export const hueFor = (f) => f?.avatar?.hue ?? hueOf(f?.name || f?.nick);
 export const hueOf = (name) => { let x = 0; for (const c of String(name || '?')) x = (x * 31 + c.charCodeAt(0)) >>> 0; return HUES[x % HUES.length]; };
 const ini = (n) => String(n || '?').replace(/^Dr\.?\s*/i, '').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase() || '?';
 const NS = 'http://www.w3.org/2000/svg';
 const svg = (tag, attrs) => { const el = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
 function arc(cx, cy, r, a0, a1) { const p = (a) => [cx + r * Math.sin(a), cy - r * Math.cos(a)]; const [x0, y0] = p(a0), [x1, y1] = p(a1); return `M${x0.toFixed(2)} ${y0.toFixed(2)}A${r} ${r} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; }
-export function ring(f, { size = 40, frac = null, label = '' } = {}) {
-  const name = f?.nick || f?.name || '?', hue = hueOf(f?.name || name), r = size / 2 - 2.5, seg = 10, gap = 0.16, lit = frac == null ? -1 : Math.max(0, Math.min(seg, Math.round(frac * seg)));
+export function ring(f, { size = 40, frac = null, label = '', dim = false } = {}) {
+  const name = f?.nick || f?.name || '?', hue = hueFor(f), r = size / 2 - 2.5, seg = 10, gap = 0.16, lit = frac == null ? -1 : Math.max(0, Math.min(seg, Math.round(frac * seg)));
   const box = svg('svg', { viewBox: `0 0 ${size} ${size}`, width: size, height: size, 'aria-hidden': 'true', class: 'ring-svg' });
   for (let i = 0; i < seg; i++) { const a0 = i / seg * Math.PI * 2 + gap / 2, a1 = (i + 1) / seg * Math.PI * 2 - gap / 2; box.append(svg('path', { d: arc(size / 2, size / 2, r, a0, a1), class: lit < 0 ? 'rs' : i < lit ? 'rs on' : 'rs off' })); }
-  return h('span', { class: `ring ${f?.kind || ''}`, style: { '--h': hue, '--s': `${size}px` }, ...(label ? { role: 'img', 'aria-label': label } : {}) }, box, h('b', {}, ini(f?.name || name)));
+  return h('span', { class: `ring ${f?.kind || ''} ${f?.avatar?.type ? `av-${f.avatar.type}` : ''} ${dim ? 'dim' : ''}`, style: { '--h': hue, '--s': `${size}px` }, ...(label ? { role: 'img', 'aria-label': label } : {}) }, box, AV.face(f?.avatar, f?.name || name, hue, size));
 }
+/** Your own face (Settings › Customise › Your avatar). */
+export const meFace = (s, size = 40, frac = null) => ring({ name: 'You', avatar: s?.settings?.custom?.me?.avatar || { type: 'char', char: { body: 'citrus', eyes: 'happy', mouth: 'smile', top: 'none' } } }, { size, frac });
+/** Change someone's face. */
+export function editFace(f, after = () => {}) { AV.avatarSheet({ cur: f.avatar, name: f.name, hue0: hueOf(f.name), sheet: ctx.sheet, title: `${F.shortName(f)}’s face`, onSave: (a) => { ctx.update(x => F.updateFriend(x, f.id, { avatar: a })); after(); } }); }
 
 // ───────────── the profile: one sheet for everything about a friend
 export function profileSheet(f) {
@@ -44,7 +51,7 @@ export function profileSheet(f) {
   const refresh = () => { close(); profileSheet(f); };
   const lastLine = st.lastContact ? `in touch ${relDay(fromKey(st.lastContact))}` : 'not in touch yet';
   const box = ctx.sheet([
-    h('div', { class: 'pf-head' }, ring(f, { size: 64 }), h('div', { class: 'grow' }, h('h2', {}, f.nick || F.shortName(f)), h('div', { class: 'small muted' }, [f.nick && f.nick !== f.name ? f.name : '', kind, unit && unit !== kind ? `${unit} rota` : ''].filter(Boolean).join(', ')),
+    h('div', { class: 'pf-head' }, h('button', { class: 'pf-face', 'aria-label': 'Change their face', title: 'Change their face', onClick: () => { close(); editFace(f, () => profileSheet(f)); } }, ring(f, { size: 72 }), h('span', { class: 'pf-pen', 'aria-hidden': 'true' }, '✎')), h('div', { class: 'grow' }, h('h2', {}, f.nick || F.shortName(f)), h('div', { class: 'small muted' }, [f.nick && f.nick !== f.name ? f.name : '', kind, unit && unit !== kind ? `${unit} rota` : ''].filter(Boolean).join(', ')),
       h('div', { class: `small ${od ? 'late' : 'muted'}` }, `${lastLine}${od ? ` · ${od > 60 ? 'long overdue' : `${days(od)} overdue`}` : ''}`))),
     SU.reach(f, ''),
     h('div', { class: 'pf-acts' },
@@ -52,6 +59,7 @@ export function profileSheet(f) {
       h('button', { class: 'btn', onClick: () => { ctx.update(x => F.logTouch(x, { who: [f.id], kind: 'call' })); toast(`Logged: talked with ${F.shortName(f)} today`, 'ok', { action: { label: 'Details', run: () => touchSheet([f.id]) } }); refresh(); } }, 'Talked today'),
       h('button', { class: 'btn', onClick: () => { close(); SU.outingSheet(null, { who: [f.id] }); } }, 'Log outing'),
       h('button', { class: 'btn ghost', onClick: () => { close(); SU.friendSheet(f); } }, 'Edit')),
+    h('div', { class: 'pf-ontoday' }, h('span', { class: 'small grow' }, 'On Today'), h('div', { class: 'seg' }, [['always', 'Always'], ['auto', 'Auto'], ['never', 'Never']].map(([k, l]) => h('button', { class: (f.onToday || 'auto') === k ? 'active' : '', 'aria-pressed': String((f.onToday || 'auto') === k), title: { always: 'Always show their face on Today, busy or not', auto: 'Show them when your Today settings say so', never: 'Never show them on Today' }[k], onClick: () => { ctx.update(x => F.updateFriend(x, f.id, { onToday: k })); refresh(); } }, l)))),
     today ? h('div', { class: 'small pf-today' }, `Today: ${today.kind === 'work' ? `working ${today.code}${today.start != null ? ` ${F.hhmm(today.start)}–${F.hhmm(today.end)}` : ''}` : today.kind === 'off' ? 'off' : today.kind === 'leave' ? 'on leave' : String(today.label || today.code).toLowerCase()}`) : null,
     h('section', { class: 'pf-sec' }, h('h3', {}, 'Free together'), free.length ? free.map(m => h('button', { class: 'pf-slot', onClick: () => { close(); SU.inviteSheet([f.id], m); } }, h('b', {}, SU.dayLabel(m.date)), h('span', {}, SU.win(m.window)), m.dayLong ? h('span', { class: 'chip sel' }, 'all day') : null))
       : h('div', { class: 'small muted' }, f.rotaKey || Object.keys(f.sched || {}).length || (f.weeklyOff || []).length ? 'No shared free time in the next 3 weeks.' : 'Link them to their rota row or add their days off to see this.')),
@@ -85,7 +93,7 @@ export function settleSheet(f) {
   const box = ctx.sheet([h('h2', {}, `Settle up with ${F.shortName(f)}`), h('div', { class: `small ${bal > 0 ? 'ok' : bal < 0 ? 'late' : 'muted'}` }, bal > 0 ? `${F.shortName(f)} owes you ${money(bal)} in total.` : bal < 0 ? `You owe ${F.shortName(f)} ${money(bal)} in total.` : 'All square.'),
     h('div', { class: 'list', style: { margin: '10px 0' } }, list.map(x => h('label', { class: 'item' }, h('input', { type: 'checkbox', onChange: (e) => { ctx.update(st => F.settle(st, x.outing.id, x.mine ? 'me' : f.id, e.target.checked)); } }), h('div', { class: 'grow' }, h('div', { class: 'name' }, `${x.outing.what || 'Meet-up'} · ${money(x.amount)}`), h('div', { class: 'meta' }, `${relDay(fromKey(x.outing.date))} · ${x.mine ? 'you owe this' : 'they owe this'}`))))),
     list.length ? h('div', { class: 'tiny dim' }, 'Tick what has been paid back.') : null,
-    h('div', { class: 'row wrap', style: { marginTop: '8px' } }, list.length ? h('button', { class: 'btn primary grow', onClick: () => { ctx.update(st => list.reduce((y, x) => F.settle(y, x.outing.id, x.mine ? 'me' : f.id, true), st)); box.close(); toast('All settled', 'ok'); } }, 'Mark all paid') : null,
+    h('div', { class: 'row wrap', style: { marginTop: '8px' } }, list.length ? h('button', { class: 'btn primary grow', onClick: (e) => { ctx.cheer(e.currentTarget); ctx.update(st => list.reduce((y, x) => F.settle(y, x.outing.id, x.mine ? 'me' : f.id, true), st)); box.close(); toast('All settled', 'ok'); } }, 'Mark all paid') : null,
       bal > 0 ? (() => { const u = F.waWith(f, `Hey ${F.shortName(f)}! Just a reminder: ${money(bal)} from ${list.filter(x => !x.mine).map(x => x.outing.what || 'our meet-up').join(', ')} 🙂`, cc()); return u ? h('a', { class: 'btn', href: u, target: '_blank', rel: 'noopener' }, 'Remind on WhatsApp') : null; })() : null)]);
 }
 

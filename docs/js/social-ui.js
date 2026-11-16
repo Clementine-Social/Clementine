@@ -7,6 +7,7 @@ import * as R from './roster.js';
 import * as CZ from './custom.js';
 import * as HUB from './hub.js';
 import * as PU from './person-ui.js';
+import * as AV from './avatar.js';
 import * as CARD from './card.js';
 import { RECORD_MAPS } from './store.js';
 
@@ -116,16 +117,20 @@ export function friendSheet(f, preset = {}) {
     const b = bd.value.trim(), bp = F.parseBirthday(b); if (b && !bp) return toast('Birthday not understood — try 14/03 or 14/03/1990', 'err');
     const hours = {}; for (const c of ['D', 'E', 'N']) { const [a, z] = (hrsIn[c] || []).map(tVal), def = F.shiftHours(S(), { ...v, rotaKey, kind: kind.value, hours: {} }, c) || []; if (a != null && z != null && a !== z && (a !== def[0] || (z || 1440) % 1440 !== (def[1] || 0) % 1440)) hours[c] = [a, z === 0 ? 1440 : z]; }
     const badDate = dates.find(d => d.label.trim() && d.date && !F.parseBirthday(d.date)); if (badDate) return toast(`“${badDate.label}”: date not understood — try 14/03 or 14/03/2015`, 'err');
-    const data = { dates: dates.filter(d => d.label.trim() && d.date).map(d => ({ label: d.label, date: F.parseBirthday(d.date) })), name: name.value, nick: nick.value, kind: kind.value, phone: phone.value, whatsapp: wa.value, snap: snap.value, insta: ig.value, place: place.value, birthday: bp, every: +every.value || 0, notes: notes.value, rotaKey, sched, weeklyOff: [...weekly], hours, fav: fav.checked };
+    const data = { avatar, onToday: v.onToday || 'auto', dates: dates.filter(d => d.label.trim() && d.date).map(d => ({ label: d.label, date: F.parseBirthday(d.date) })), name: name.value, nick: nick.value, kind: kind.value, phone: phone.value, whatsapp: wa.value, snap: snap.value, insta: ig.value, place: place.value, birthday: bp, every: +every.value || 0, notes: notes.value, rotaKey, sched, weeklyOff: [...weekly], hours, fav: fav.checked };
     const clash = rotaKey && F.friendList(S()).find(x => x.rotaKey === rotaKey && x.id !== f?.id); if (clash) return toast(`That rota row is already ${F.shortName(clash)}'s`, 'err');
     const dropped = [[snap, 'Snapchat'], [ig, 'Instagram']].filter(([el]) => el.value.trim() && !F.cleanHandle(el.value)).map(([, l]) => l);
     ctx.update(s => f ? F.updateFriend(s, f.id, data) : F.addFriend(s, data)); box.close(); if (dropped.length) toast(`${dropped.join(' and ')}: no username found, left empty`, 'err'); else if (!f) toast(`${data.nick || data.name} added`, 'ok'); };
   const remove = () => { if (!confirm(`Remove ${f.name}?${f.rotaKey ? ' Their numbers stay on their colleague card.' : ''} Past outings keep their name.`)) return; const before = S(); ctx.update(s => F.deleteFriend(s, f.id)); box.close(); toast(`${F.shortName(f)} removed`, '', { action: { label: 'Undo', run: () => ctx.update(x => undoTo(x, before)) } }); };
-  const box = ctx.sheet([h('h2', {}, f ? f.name : (v.kind === 'family' ? 'New family member' : 'New friend')), h('div', { class: 'grid2' }, field('Name', name), field('Nickname', nick)), h('div', { class: 'grid2' }, field('Type', kind), field('', h('label', { class: 'chip', style: { marginTop: '22px' } }, fav, ' ⭐ Favourite'))),
+  let avatar = v.avatar || null;
+  const faceBtn = h('button', { type: 'button', class: 'fe-face', 'aria-label': 'Change face', onClick: () => AV.avatarSheet({ cur: avatar, name: name.value || 'New', hue0: PU.hueOf(name.value || 'New'), sheet: ctx.sheet, title: 'Face', onSave: (a) => { avatar = a; paintFace(); } }) });
+  const paintFace = () => faceBtn.replaceChildren(PU.ring({ name: name.value || '?', avatar, kind: kind.value }, { size: 64 }), h('span', { class: 'pf-pen', 'aria-hidden': 'true' }, '✎'));
+  name.addEventListener('input', () => { if (!avatar || avatar.type === 'initials') paintFace(); });
+  const box = ctx.sheet([h('div', { class: 'fe-top' }, faceBtn, h('h2', {}, f ? f.name : (v.kind === 'family' ? 'New family member' : 'New friend'))), h('div', { class: 'grid2' }, field('Name', name), field('Nickname', nick)), h('div', { class: 'grid2' }, field('Type', kind), field('', h('label', { class: 'chip', style: { marginTop: '22px' } }, fav, ' ⭐ Favourite'))),
     h('div', { class: 'grid2' }, field('Phone', phone, phoneHint(phone)), field('WhatsApp', wa, phoneHint(wa))), h('div', { class: 'grid2' }, field('Snapchat', snap, handleHint(snap)), field('Instagram', ig, handleHint(ig))),
     field('Their rota row', rotaBtn), paint, field('Area', place), h('div', { class: 'grid2' }, field('Birthday', bd), field('Keep in touch every (days, 0 = off)', every)), field('Other dates', datesBox), field('Notes (only on this card, never shared)', notes),
     h('div', { class: 'row wrap' }, h('button', { class: 'btn primary grow', onClick: save }, 'Save'), f ? h('button', { class: 'btn danger', onClick: remove }, 'Remove') : null)]);
-  paintRota(); paintHours();
+  paintRota(); paintHours(); paintFace();
 }
 
 // ───────────── free-days grid
@@ -328,7 +333,7 @@ export function outingSheet(o, preset = {}) {
     h('details', { class: 'ob-sec', open: bring.length ? '' : null }, h('summary', {}, 'Who brings what', bring.length ? h('span', { class: 'tiny dim' }, ` · ${bring.filter(b => b.done).length}/${bring.length} sorted`) : null), bringBox),
     h('details', { class: 'ob-sec', open: c0 ? '' : null }, h('summary', {}, 'The bill', c0 ? h('span', { class: 'tiny dim' }, ` · ${c0.total} SAR`) : null), h('div', { class: 'grid2' }, field('Total (SAR)', total), field('Paid by', paidBy)), field('Split between', splitBox, shareTxt)),
     field('How was it', rating), field('Notes', notes),
-    h('div', { class: 'row wrap' }, o?.planned && F.outingDue(o) ? h('button', { class: 'btn primary grow', onClick: () => save(true) }, 'Yes, it happened') : h('button', { class: 'btn primary grow', onClick: () => save() }, 'Save'),
+    h('div', { class: 'row wrap' }, o?.planned && F.outingDue(o) ? h('button', { class: 'btn primary grow', onClick: (e) => { ctx.cheer(e.currentTarget); save(true); } }, 'Yes, it happened') : h('button', { class: 'btn primary grow', onClick: () => save() }, 'Save'),
       o ? h('button', { class: 'btn', onClick: () => CARD.shareOuting(S().outings[o.id] || o, S()) }, 'Share card') : null,
       o ? h('button', { class: 'btn danger', onClick: del }, o.planned ? (F.outingDue(o) ? 'It didn’t happen' : 'Cancel plan') : 'Delete') : null)]);
 }
@@ -368,41 +373,83 @@ function weekStrip(s, now) {
     const lab = me.status === 'work' ? (me.type === 'N' || me.end > 1440 ? 'Night' : 'Day') : me.status === 'leave' ? 'Leave' : me.status === 'off' ? (me.afterNight ? 'Sleep' : 'Off') : '—';
     return h('button', { class: `cw-d ${me.status} ${me.afterNight ? 'post' : ''} ${+d === +start ? 'today' : ''} ${[5, 6].includes(d.getDay()) ? 'we' : ''}`, 'aria-label': `${dayLabel(d)}: ${lab}, ${with_.length} free with you`, onClick: () => daySheet(d) },
       h('small', {}, DAY_SHORT[d.getDay()]), h('b', {}, d.getDate()), h('span', { class: 'cw-s' }, lab),
-      h('span', { class: 'cw-faces' }, with_.slice(0, 3).map(f => h('i', { style: { '--h': PU.hueOf(f.name) }, title: F.shortName(f) }, F.shortName(f)[0])), with_.length > 3 ? h('em', {}, `+${with_.length - 3}`) : null));
+      h('span', { class: 'cw-faces' }, with_.slice(0, 3).map(f => h('i', { style: { '--h': PU.hueFor(f) }, title: F.shortName(f) }, f.avatar?.type === 'emoji' ? f.avatar.emoji : F.shortName(f)[0])), with_.length > 3 ? h('em', {}, `+${with_.length - 3}`) : null));
   });
   return h('div', { class: 'cw', role: 'group', 'aria-label': 'This week' }, cols);
 }
 
-/** Today: who you could see, what is coming, what is waiting on you. */
+/** Tap a face on Today: what you can do with that person right now. */
+function faceMenu(x, today) {
+  const f = x.f, k = keyOf(today), cfg = CZ.custom(S()).today, set = (patch) => ctx.update(st => CZ.setCustom(st, 'today', patch));
+  const box = ctx.sheet([h('div', { class: 'pf-head' }, av(f, { size: 64, frac: x.frac }), h('div', { class: 'grow' }, h('h2', {}, F.shortName(f)), h('div', { class: 'small muted' }, x.window ? `Free with you ${win(x.window)}` : 'Not free with you today'))),
+    h('div', { class: 'fm-acts' },
+      x.window ? h('button', { class: 'btn primary', onClick: () => { box.close(); inviteSheet([f.id], { date: today, key: k, window: x.window, who: [f.id] }); } }, '💬 Invite for today') : h('button', { class: 'btn primary', onClick: () => { box.close(); inviteSheet([f.id]); } }, '💬 Find another day'),
+      reachMini(f) ? h('a', { class: 'btn', href: F.links(f, cc()).wa, target: '_blank', rel: 'noopener' }, 'WhatsApp') : null,
+      h('button', { class: 'btn', onClick: () => { box.close(); PU.profileSheet(f); } }, 'Profile')),
+    h('div', { class: 'tiny dim', style: { margin: '14px 0 6px' } }, 'On Today'),
+    h('div', { class: 'fm-acts' },
+      h('button', { class: 'btn', onClick: () => { set({ hidden: { date: k, ids: [...new Set([...(cfg.hidden.date === k ? cfg.hidden.ids : []), f.id])] } }); box.close(); toast(`${F.shortName(f)} hidden for today`, '', { action: { label: 'Undo', run: () => set({ hidden: { date: k, ids: (CZ.custom(S()).today.hidden.ids || []).filter(i => i !== f.id) } }) } }); } }, 'Hide for today'),
+      h('button', { class: `btn ${f.onToday === 'always' ? 'sel' : ''}`, onClick: () => { ctx.update(st => F.updateFriend(st, f.id, { onToday: f.onToday === 'always' ? 'auto' : 'always' })); box.close(); toast(f.onToday === 'always' ? `${F.shortName(f)} back to auto` : `${F.shortName(f)} always shows on Today`); } }, f.onToday === 'always' ? '📌 Unpin' : '📌 Always show'),
+      h('button', { class: 'btn', onClick: () => { ctx.update(st => F.updateFriend(st, f.id, { onToday: 'never' })); box.close(); toast(`${F.shortName(f)} won’t show on Today`, '', { action: { label: 'Undo', run: () => ctx.update(st => F.updateFriend(st, f.id, { onToday: 'auto' })) } }); } }, 'Never show')),
+    h('button', { class: 'btn ghost', style: { marginTop: '10px' }, onClick: () => { box.close(); facesSheet(); } }, 'Edit who shows and in what order')]);
+}
+/** Who shows on Today and in what order: what to show, how to sort, how many, and each person's Always / Auto / Never. */
+export function facesSheet() {
+  const wrap = h('div'); const box = ctx.sheet([wrap]);
+  const paint = () => {
+    const s = S(), c = CZ.custom(s).today, fr = F.friendList(s), set = (patch) => { ctx.update(st => CZ.setCustom(st, 'today', patch)); paint(); };
+    const order = [...c.order.filter(id => s.friends?.[id]), ...fr.map(f => f.id).filter(id => !c.order.includes(id))];
+    const list = c.sort === 'manual' ? order.map(id => s.friends[id]) : fr;
+    const k = keyOf(new Date()), hiddenToday = c.hidden.date === k ? c.hidden.ids.filter(id => s.friends?.[id]) : [];
+    wrap.replaceChildren(h('h2', {}, 'Faces on Today'),
+      h('div', { class: 'field' }, h('label', {}, 'Show'), h('div', { class: 'chips' }, CZ.FACE_SHOW.map(([id, l]) => h('button', { class: `chip ${c.show === id ? 'sel' : ''}`, 'aria-pressed': String(c.show === id), onClick: () => set({ show: id }) }, l)))),
+      h('div', { class: 'field' }, h('label', {}, 'Order'), h('div', { class: 'chips' }, CZ.FACE_SORT.map(([id, l]) => h('button', { class: `chip ${c.sort === id ? 'sel' : ''}`, 'aria-pressed': String(c.sort === id), onClick: () => set({ sort: id, ...(id === 'manual' && !c.order.length ? { order } : {}) }) }, l)))),
+      h('div', { class: 'field' }, h('label', {}, `At most ${c.max} faces`), h('input', { type: 'range', min: 3, max: 30, value: c.max, 'aria-label': 'How many faces', onChange: (e) => set({ max: +e.target.value }) })),
+      hiddenToday.length ? h('div', { class: 'row wrap small', style: { gap: '6px', margin: '6px 0' } }, `Hidden for today: ${hiddenToday.map(id => F.shortName(s.friends[id])).join(', ')}`, h('button', { class: 'btn sm ghost', onClick: () => set({ hidden: { date: '', ids: [] } }) }, 'Show them again')) : null,
+      h('div', { class: 'tiny dim', style: { margin: '10px 0 4px' } }, c.sort === 'manual' ? 'Each person, in your order. Always = shows even when busy; Never = never on Today.' : 'Each person. Always = shows even when busy; Never = never on Today. Pick “My own order” to arrange them.'),
+      h('div', { class: 'fs-list' }, list.map((f, i) => h('div', { class: 'fs-row' }, av(f, { size: 36 }), h('span', { class: 'grow' }, F.shortName(f)),
+        c.sort === 'manual' ? [h('button', { class: 'btn sm ghost', 'aria-label': `Move ${F.shortName(f)} up`, disabled: i === 0, onClick: () => set({ order: CZ.move(order, f.id, -1) }) }, '↑'), h('button', { class: 'btn sm ghost', 'aria-label': `Move ${F.shortName(f)} down`, disabled: i === list.length - 1, onClick: () => set({ order: CZ.move(order, f.id, 1) }) }, '↓')] : null,
+        h('div', { class: 'seg fs-seg' }, [['always', '📌'], ['auto', 'Auto'], ['never', 'Never']].map(([kk, l]) => h('button', { class: (f.onToday || 'auto') === kk ? 'active' : '', 'aria-label': `${F.shortName(f)}: ${kk}`, 'aria-pressed': String((f.onToday || 'auto') === kk), onClick: () => { ctx.update(st => F.updateFriend(st, f.id, { onToday: kk })); paint(); } }, l)))))));
+  };
+  paint();
+}
+
+/** Today: who you could see, what is coming, what is waiting on you — in the order you set (Settings › Customise › Today). */
 export function renderToday() {
   freshBusy();
-  const s = S(), now = new Date(), fr = F.friendList(s), up = HUB.upcoming(s, now), due = F.outingList(s).filter(o => F.outingDue(o, now));
-  const today = startOfDay(now), me = F.meState(s, today, busyOf(today)), mineLeft = F.clipToNow(me.windows, today, now), tw = F.freeWith(s, today, { busy: busyOf(today), now });
+  const s = S(), now = new Date(), fr = F.friendList(s), up = HUB.upcoming(s, now), due = F.outingList(s).filter(o => F.outingDue(o, now)), cz = CZ.custom(s);
+  const today = startOfDay(now), me = F.meState(s, today, busyOf(today)), mineLeft = F.clipToNow(me.windows, today, now);
   const myDay = me.status === 'work' ? `you work ${F.hhmm(me.start % 1440)}–${F.hhmm(me.end % 1440)}${me.type === 'N' || me.end > 1440 ? ' tonight' : ''}` : me.status === 'off' ? (me.afterNight ? 'off, after your night' : 'your day off') : me.status === 'leave' ? 'on leave' : R.has() ? 'no rota for today' : '';
-  const out = [h('header', { class: 'td-head' }, h('h1', {}, 'Today'), h('p', { class: 'td-sub' }, `${DAY_NAMES[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]}${myDay ? `, ${myDay}` : ''}`))];
+  const out = [h('header', { class: 'td-head' }, h('div', { class: 'grow' }, h('h1', {}, 'Today'), h('p', { class: 'td-sub' }, `${DAY_NAMES[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]}${myDay ? `, ${myDay}` : ''}`)),
+    h('button', { class: 'td-me', 'aria-label': 'Your face and Customise', title: 'Your face (Settings › Customise)', onClick: () => ctx.editMe() }, PU.meFace(s, 54, mineLeft.length ? Math.min(1, mineLeft.reduce((t, w) => t + w[1] - w[0], 0) / Math.max(1, F.timing().late - F.timing().wake)) : 0)))];
   if (!fr.length && !Object.keys(s.contacts || {}).length) {
     out.push(h('div', { class: 'card td-hero' }, h('div', { class: 'title' }, 'Your people, and when you can see them'),
       h('p', { class: 'small muted' }, 'Add the people you keep up with. Colleagues linked to their rota row show their shifts by themselves (from Mandarin); your friends come over from Citrus the first time you sign in.'),
       h('div', { class: 'row wrap' }, h('button', { class: 'btn primary grow', onClick: () => friendSheet(null) }, 'Add a friend'), h('button', { class: 'btn grow', onClick: () => friendSheet(null, { kind: 'family', every: 7 }) }, 'Add family'), contactsButton(), ctx.signedIn() ? null : h('button', { class: 'btn grow', onClick: () => ctx.go('more') }, 'Sign in with Google'))));
     return out;
   }
-  // the hero: faces free with you today; each ring lights up for the share of the day you are both free
-  const span = Math.max(1, F.timing().late - F.timing().wake);
+  // the hero: the faces you chose, each ring lit for the share of your day you are both free
+  const faces = F.todayFaces(s, today, { busy: busyOf(today), now, cfg: cz.today }), freeN = faces.filter(x => x.window).length;
+  const title = !mineLeft.length ? 'No free time left today' : cz.today.show === 'free' ? (freeN ? `Free with you today` : 'Nobody is free with you today') : freeN ? `${freeN} free with you today` : 'Your people today';
+  const sections = {
+    week: () => weekStrip(s, now),
+    due: () => due.length ? h('div', { class: 'card warn' }, h('div', { class: 'title' }, 'Did these happen?'), due.slice(0, 4).map(o => h('div', { class: 'row nudge' }, h('span', { class: 'ch-ic sm' }, '📅'), h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up'), h('div', { class: 'tiny dim' }, `${relDay(fromKey(o.date))}${o.start != null ? ` ${F.hhmm(o.start)}` : ''}, ${o.who.map(w => nameOf(w, o)).join(', ') || 'solo'}`)),
+      h('button', { class: 'btn sm primary', onClick: (e) => { ctx.cheer(e.currentTarget); ctx.update(x => F.logOuting(x, { ...o, planned: false })); toast('Logged — last-seen dates updated', 'ok', { action: { label: 'Rate it', run: () => outingSheet(S().outings[o.id]) } }); } }, 'Yes'), h('button', { class: 'btn sm ghost', onClick: () => cancelOuting(o, 'Marked as not happened') }, 'No')))) : null,
+    coming: () => up.length ? h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'title grow' }, 'Coming up'), h('button', { class: 'btn sm ghost', onClick: () => ctx.go('outings') }, 'All')), up.slice(0, 4).map(o => h('div', { class: 'item clickable td-up', onClick: () => outingSheet(o) }, h('div', { class: 'td-date' }, h('b', {}, fromKey(o.date).getDate()), h('small', {}, DAY_SHORT[fromKey(o.date).getDay()])), h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up', o.start != null ? h('span', { class: 'dim' }, ` ${F.hhmm(o.start)}`) : null), h('div', { class: 'meta' }, [o.who.map(w => nameOf(w, o)).join(', '), o.where, o.bring?.length ? `${o.bring.filter(b => !b.done).length} to bring` : ''].filter(Boolean).join(', ')))))) : null,
+    reminders: () => safe('Reminders', nudgeCard),
+    polls: () => { const open = X.pollList(s).filter(p => p.status === 'open'); return open.length ? h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'title grow' }, 'Open polls'), h('button', { class: 'btn sm ghost', onClick: () => ctx.go('plans') }, 'Plans')), open.slice(0, 3).map(p => { const r = X.pollResult(p); return h('div', { class: 'row small', style: { padding: '4px 0' } }, h('b', { class: 'grow' }, p.title), h('span', { class: `chip ${r.everyone ? 'sel' : ''}` }, r.everyone ? 'everyone can' : `${r.answered.length}/${p.who.length} answered`)); })) : null; },
+    best: () => safe('Best times', () => bestCard(3, 10)),
+    actions: () => h('div', { class: 'td-acts' }, h('button', { class: 'btn', onClick: () => inviteSheet([]) }, '💬 Plan a meet-up'), h('button', { class: 'btn', onClick: () => PU.touchSheet() }, '📞 Log a call'), h('button', { class: 'btn', onClick: () => outingSheet(null) }, '📝 Log an outing'), h('button', { class: 'btn', onClick: () => PU.availabilitySheet() }, '🗓 Share my free time'), h('button', { class: 'btn', onClick: () => findSheet() }, '🔎 Find a day')),
+  };
+  const shown = cz.today.sections.order.filter(id => !cz.today.sections.hidden.includes(id));
   out.push(h('section', { class: 'card td-hero' },
-    h('div', { class: 'title' }, !mineLeft.length ? 'No free time left today' : tw.length ? `Free with you today` : `You are free ${mineLeft.map(win).join(', ')}`),
-    tw.length ? h('div', { class: 'td-faces' }, tw.slice(0, 12).map(x => h('button', { class: 'td-face', onClick: () => inviteSheet([x.f.id], { date: today, key: keyOf(today), window: x.window, who: [x.f.id] }), 'aria-label': `${x.f.name}, free with you ${win(x.window)}: invite` },
-      av(x.f, { size: 58, frac: (x.window[1] - x.window[0]) / span }), h('b', {}, F.shortName(x.f)), h('small', {}, `from ${F.hhmm(x.window[0])}`)))) : mineLeft.length ? h('div', { class: 'small muted' }, 'None of your friends is free at the same time today.') : null,
-    weekStrip(s, now)));
-  const deck = [];
-  if (due.length) deck.push(h('div', { class: 'card warn' }, h('div', { class: 'title' }, 'Did these happen?'), due.slice(0, 4).map(o => h('div', { class: 'row nudge' }, h('span', { class: 'ch-ic sm' }, '📅'), h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up'), h('div', { class: 'tiny dim' }, `${relDay(fromKey(o.date))}${o.start != null ? ` ${F.hhmm(o.start)}` : ''}, ${o.who.map(w => nameOf(w, o)).join(', ') || 'solo'}`)),
-    h('button', { class: 'btn sm primary', onClick: () => { ctx.update(x => F.logOuting(x, { ...o, planned: false })); toast('Logged — last-seen dates updated', 'ok', { action: { label: 'Rate it', run: () => outingSheet(S().outings[o.id]) } }); } }, 'Yes'), h('button', { class: 'btn sm ghost', onClick: () => cancelOuting(o, 'Marked as not happened') }, 'No')))));
-  if (up.length) deck.push(h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'title grow' }, 'Coming up'), h('button', { class: 'btn sm ghost', onClick: () => ctx.go('outings') }, 'All')), up.slice(0, 4).map(o => h('div', { class: 'item clickable td-up', onClick: () => outingSheet(o) }, h('div', { class: 'td-date' }, h('b', {}, fromKey(o.date).getDate()), h('small', {}, DAY_SHORT[fromKey(o.date).getDay()])), h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up', o.start != null ? h('span', { class: 'dim' }, ` ${F.hhmm(o.start)}`) : null), h('div', { class: 'meta' }, [o.who.map(w => nameOf(w, o)).join(', '), o.where, o.bring?.length ? `${o.bring.filter(b => !b.done).length} to bring` : ''].filter(Boolean).join(', ')))))));
-  deck.push(safe('Reminders', nudgeCard));
-  const open = X.pollList(s).filter(p => p.status === 'open');
-  if (open.length) deck.push(h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'title grow' }, 'Open polls'), h('button', { class: 'btn sm ghost', onClick: () => ctx.go('plans') }, 'Plans')), open.slice(0, 3).map(p => { const r = X.pollResult(p); return h('div', { class: 'row small', style: { padding: '4px 0' } }, h('b', { class: 'grow' }, p.title), h('span', { class: `chip ${r.everyone ? 'sel' : ''}` }, r.everyone ? 'everyone can' : `${r.answered.length}/${p.who.length} answered`)); })));
-  deck.push(safe('Best times', () => bestCard(3, 10)));
+    h('div', { class: 'row td-hero-top' }, h('div', { class: 'title grow' }, title), h('button', { class: 'btn sm ghost', 'aria-label': 'Choose who shows here', title: 'Choose who shows here', onClick: () => facesSheet() }, 'Edit')),
+    faces.length ? h('div', { class: 'td-faces' }, faces.map(x => h('button', { class: `td-face ${x.window ? '' : 'busy'}`, onClick: () => faceMenu(x, today), 'aria-label': `${x.f.name}${x.window ? `, free with you ${win(x.window)}` : ', not free today'}` },
+      av(x.f, { size: 62, frac: x.frac, dim: !x.window }), h('b', {}, F.shortName(x.f)), h('small', {}, x.window ? `from ${F.hhmm(x.window[0])}` : 'busy')))) : mineLeft.length ? h('div', { class: 'small muted' }, cz.today.show === 'pinned' ? 'Pin people with Edit (or from their profile) to see them here.' : 'None of them is free at the same time today.') : null,
+    shown.includes('week') ? sections.week() : null));
+  const deck = shown.filter(id => id !== 'week' && id !== 'actions').map(id => sections[id]()).filter(Boolean);
   out.push(h('div', { class: 'deck' }, deck));
-  out.push(h('div', { class: 'td-acts' }, h('button', { class: 'btn', onClick: () => inviteSheet([]) }, '💬 Plan a meet-up'), h('button', { class: 'btn', onClick: () => PU.touchSheet() }, '📞 Log a call'), h('button', { class: 'btn', onClick: () => outingSheet(null) }, '📝 Log an outing'), h('button', { class: 'btn', onClick: () => PU.availabilitySheet() }, '🗓 Share my free time'), h('button', { class: 'btn', onClick: () => findSheet() }, '🔎 Find a day')));
+  if (shown.includes('actions')) out.push(sections.actions());
   return out;
 }
 

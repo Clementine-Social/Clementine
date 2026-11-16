@@ -13,10 +13,11 @@ import * as SU from './social-ui.js';
 import * as PU from './people-ui.js';
 import * as XU from './plans-ui.js';
 import * as PE from './person-ui.js';
+import * as AV from './avatar.js';
 import { checkBackup, describeCounts } from './backup-check.js';
 import { h, toast, keyOf, fromKey, addDays, startOfDay, fmtDate, pad2, DAY_NAMES, MONTHS, uid } from './util.js';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 const CITRUS_URL = 'https://amaerys.github.io/citrus-maxima/';
 const MANDARIN_URL = 'https://mandarin-work.github.io/Mandarin/';
 
@@ -61,7 +62,7 @@ async function boot() {
   });
   window.addEventListener('online', () => { rt.online = true; renderSync(); flushOutbox().then(render).catch(() => {}); });
   window.addEventListener('offline', () => { rt.online = false; renderSync(); });
-  const sub = { S, update: (fn) => store.update(fn), revert: store.revert, sheet: (c) => sheet(c), render: () => render(), go: (v, p) => go(v, p), busyOf, addEvent, removeEvent, signedIn: () => G.isSignedIn() || G.wasSignedIn(), personSheet: (k) => PU.personSheet(k), freePart: SU.freePart };
+  const sub = { S, update: (fn) => store.update(fn), revert: store.revert, sheet: (c) => sheet(c), render: () => render(), go: (v, p) => go(v, p), busyOf, addEvent, removeEvent, editMe, cheer, signedIn: () => G.isSignedIn() || G.wasSignedIn(), personSheet: (k) => PU.personSheet(k), freePart: SU.freePart };
   SU.initSocial(sub); PU.initPeople(sub); XU.initPlans(sub); PE.initPerson(sub);
   store.subscribe(() => { applyTiming(); render(); publishSoon(); });
   store.onRemoteSync(scheduleRemoteSave);
@@ -92,7 +93,22 @@ async function boot() {
   setInterval(() => { if (document.visibilityState === 'visible' && G.isSignedIn() && rt.online && Date.now() - (S().google.lastSync || 0) > 5 * 60000) refreshAll(false); }, 60000);
   renderSync();
 }
-function applyTiming() { F.setTiming(CZ.custom(S()).social); }
+function applyTiming() { F.setTiming(CZ.custom(S()).social); applyLook(); }
+/** Customise › Look: accent colour, bubbly or classic shapes, comfy or compact, celebrations — synced, set on <html>. */
+function applyLook() { const l = CZ.custom(S()).look, r = document.documentElement; r.dataset.accent = l.accent; r.dataset.shape = l.shape; r.dataset.density = l.density; r.dataset.fun = l.fun ? 'on' : 'off'; }
+/** Your own face, used on Today and in the grid. */
+function editMe() { AV.avatarSheet({ cur: CZ.custom(S()).me.avatar, name: 'You', hue0: 14, sheet, title: 'Your face', onSave: (a) => store.update(s => CZ.setCustom(s, 'me', { avatar: a })) }); }
+/** A small burst of confetti from a button (when celebrations are on and motion is welcome). */
+function cheer(from) {
+  if (!CZ.custom(S()).look.fun || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const r = (from?.getBoundingClientRect?.() || { left: innerWidth / 2, top: innerHeight / 2, width: 0, height: 0 }), x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const colors = ['var(--orange)', 'var(--pith)', 'var(--leaf)', 'var(--dusk)', '#ffcf3f', '#ff6b9a'];
+  for (let i = 0; i < 22; i++) {
+    const p = document.createElement('i'), a = Math.random() * Math.PI * 2, d = 50 + Math.random() * 90;
+    p.className = 'confetti'; p.style.cssText = `left:${x}px;top:${y}px;background:${colors[i % colors.length]};--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d - 40}px;--r:${Math.random() * 540 - 270}deg;${i % 3 ? '' : 'border-radius:50%;'}`;
+    document.body.append(p); setTimeout(() => p.remove(), 1000);
+  }
+}
 
 // Arriving from another app or a link: ?from=citrus shows "← Citrus"; ?do=<action> (or #view) jumps straight there.
 const DO = { call: ['today', 'call'], share: ['today', 'share'], today: ['today'], free: ['free'], find: ['free', 'find'], invite: ['today', 'invite'], log: ['outings', 'log'], outings: ['outings'], birthdays: ['people', 'birthdays'], people: ['people'], colleagues: ['people', 'colleagues'], groups: ['people', 'groups'], plans: ['plans'], poll: ['plans', 'poll'], polls: ['plans'], add: ['people', 'add'] };
@@ -541,7 +557,7 @@ async function repairSheet() {
 }
 
 // ---------------- SETTINGS ----------------
-const czOpen = new Set();
+const czOpen = new Set(['Today', 'Look']);
 const hmIn = (m, label, onChange) => h('input', { type: 'time', value: F.hhmm(m % 1440), 'aria-label': label, step: 900, onChange: (e) => { const [a, b] = e.target.value.split(':').map(Number); if (Number.isFinite(a)) onChange(a * 60 + (b || 0)); } });
 function customiseCard() {
   const c = CZ.custom(S()), set = (part, patch) => store.update(s => CZ.setCustom(s, part, patch));
@@ -557,6 +573,18 @@ function customiseCard() {
       h('div', { class: 'cz-row' }, h('span', { class: 'grow small' }, 'Out until'), hmIn(c.social.late, 'Out until', (m) => set('social', { late: m <= 6 * 60 ? m + 1440 : m }))),
       h('div', { class: 'cz-row' }, h('span', { class: 'grow small' }, 'Shortest meet-up worth suggesting'), h('select', { 'aria-label': 'Shortest meet-up', onChange: (e) => set('social', { minMeet: +e.target.value }) }, [[60, '1 hour'], [90, '1½ hours'], [120, '2 hours'], [180, '3 hours']].map(([v, l]) => h('option', { value: v, selected: c.social.minMeet === v }, l)))),
       h('div', { class: 'cz-row' }, h('span', { class: 'grow small' }, 'Days in the Who is free grid'), h('select', { 'aria-label': 'Days in the grid', onChange: (e) => set('social', { days: +e.target.value }) }, [[0, 'Fit the screen'], [7, '7'], [10, '10'], [14, '14'], [21, '21']].map(([v, l]) => h('option', { value: v, selected: c.social.days === v }, l))))),
+    sec('Today', 'which faces show, which cards, in what order',
+      h('button', { class: 'btn sm', onClick: () => SU.facesSheet() }, 'Choose who shows in “Free with you today”'),
+      h('div', { class: 'tiny dim', style: { margin: '10px 0 4px' } }, 'Cards under the faces'),
+      ...c.today.sections.order.map((id, i) => { const lab = CZ.SECTIONS.find(x => x[0] === id)[1], hidden = c.today.sections.hidden.includes(id);
+        return h('div', { class: 'cz-row' }, h('span', { class: 'grow' }, lab), h('button', { class: 'btn sm ghost', 'aria-label': `Move ${lab} up`, disabled: i === 0, onClick: () => set('today', { sections: { ...c.today.sections, order: CZ.move(c.today.sections.order, id, -1) } }) }, '↑'), h('button', { class: 'btn sm ghost', 'aria-label': `Move ${lab} down`, disabled: i === c.today.sections.order.length - 1, onClick: () => set('today', { sections: { ...c.today.sections, order: CZ.move(c.today.sections.order, id, 1) } }) }, '↓'),
+          chip(!hidden, hidden ? 'Hidden' : 'Shown', () => set('today', { sections: { ...c.today.sections, hidden: CZ.toggleIn(c.today.sections.hidden, id) } }))); })),
+    sec('Look', 'colour, shapes, spacing, celebrations',
+      h('div', { class: 'tiny dim' }, 'Accent colour'), h('div', { class: 'cz-accents', role: 'radiogroup', 'aria-label': 'Accent colour' }, CZ.ACCENTS.map(([id, l, hex]) => h('button', { class: `cz-acc ${c.look.accent === id ? 'sel' : ''}`, role: 'radio', 'aria-checked': String(c.look.accent === id), style: { '--c': hex }, onClick: () => set('look', { accent: id }) }, h('i'), l))),
+      h('div', { class: 'cz-row' }, h('span', { class: 'grow small' }, 'Shapes'), h('div', { class: 'seg' }, [['bubbly', 'Bubbly'], ['classic', 'Classic']].map(([k, l]) => h('button', { class: c.look.shape === k ? 'active' : '', 'aria-pressed': String(c.look.shape === k), onClick: () => set('look', { shape: k }) }, l)))),
+      h('div', { class: 'cz-row' }, h('span', { class: 'grow small' }, 'Spacing'), h('div', { class: 'seg' }, [['comfy', 'Comfy'], ['compact', 'Compact']].map(([k, l]) => h('button', { class: c.look.density === k ? 'active' : '', 'aria-pressed': String(c.look.density === k), onClick: () => set('look', { density: k }) }, l)))),
+      h('div', { class: 'cz-row' }, h('span', { class: 'grow small' }, 'Celebrations (confetti when a meet-up happened, a bounce on tap)'), chip(c.look.fun, c.look.fun ? 'On' : 'Off', () => set('look', { fun: !c.look.fun })))),
+    sec('Your face', 'shown on Today', h('div', { class: 'row', style: { gap: '12px', alignItems: 'center' } }, PE.meFace(S(), 56), h('button', { class: 'btn sm', onClick: editMe }, 'Change your face'))),
     sec('Reminders', 'when a birthday starts waiting on you', h('div', { class: 'cz-row' }, h('span', { class: 'grow small' }, 'Birthdays show in Citrus from'), h('select', { 'aria-label': 'Birthday reminder', onChange: (e) => set('remind', { birthdays: +e.target.value }) }, [[0, 'the day itself'], [1, '1 day before'], [3, '3 days before'], [7, 'a week before']].map(([v, l]) => h('option', { value: v, selected: c.remind.birthdays === v }, l))))),
     sec('Tabs', 'order, hide, start tab', ...[...c.tabs.order].map(id => tabRow(CZ.TABS.find(t => t[0] === id))), h('div', { class: 'cz-row' }, h('span', { class: 'grow small' }, 'Open on'), h('select', { 'aria-label': 'Open on', onChange: (e) => set('start', e.target.value) }, CZ.TABS.filter(([id]) => !c.tabs.hidden.includes(id)).map(([id, l]) => h('option', { value: id, selected: c.start === id }, l))))),
     h('button', { class: 'btn sm ghost', style: { marginTop: '8px' }, onClick: () => { if (confirm('Put every Customise choice back to the default?')) store.update(s => ({ ...s, settings: { ...s.settings, custom: {} } })); } }, 'Reset Customise'));

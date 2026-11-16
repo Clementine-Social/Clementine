@@ -70,6 +70,7 @@ export function sanitize(input, report = { fixed: 0, notes: [] }) {
     for (const [f, t] of Object.entries(FIELDS[k] || {})) if (t === 's' ? typeof r[f] !== 'string' : !Array.isArray(r[f])) { if (r === v) { r = { ...v }; fix(`${k}.${id}.${f}`, false); } r[f] = t === 's' ? str(r[f]) : []; }
     if (k === 'polls' && !(r.votes && typeof r.votes === 'object' && !Array.isArray(r.votes))) { if (r === v) r = { ...v }; r.votes = {}; fix(`${k}.${id}.votes`, false); }
     if (k === 'friends') for (const f of ['sched', 'hours']) if (r[f] !== undefined && !isObj(r[f])) { if (r === v) r = { ...v }; r[f] = {}; fix(`${k}.${id}.${f}`, false); }
+    if (k === 'friends' && r.avatar != null && !(isObj(r.avatar) && typeof r.avatar.type === 'string')) { if (r === v) r = { ...v }; r.avatar = null; fix(`${k}.${id}.avatar`, false); }
     if (k === 'friends') for (const f of ['dates', 'gifts']) if (r[f] !== undefined && !Array.isArray(r[f])) { if (r === v) r = { ...v }; r[f] = []; fix(`${k}.${id}.${f}`, false); }
     if (k === 'outings') for (const f of ['bring']) if (r[f] !== undefined && !Array.isArray(r[f])) { if (r === v) r = { ...v }; r[f] = []; fix(`${k}.${id}.${f}`, false); }
     if (k === 'outings' && r.cost !== undefined && !(isObj(r.cost) && Array.isArray(r.cost.split) && Array.isArray(r.cost.settled) && +r.cost.total > 0)) { if (r === v) r = { ...v }; delete r.cost; fix(`${k}.${id}.cost`, false); }
