@@ -5,6 +5,7 @@ import * as F from './social.js';
 import * as R from './roster.js';
 import * as SU from './social-ui.js';
 import * as AV from './avatar.js';
+import * as LU from './life-ui.js';
 
 let ctx = null;
 export function initPerson(c) { ctx = c; }
@@ -46,13 +47,14 @@ export function profileSheet(f) {
   const tl = F.timeline(s, f.id, now, 12);
   const gifts = f.gifts || [];
   const close = () => box.close();
+  const extra = LU.profileParts(f, () => refresh(), () => close());
   const giftAdd = h('input', { 'data-nofocus': '', placeholder: 'A gift idea (book, perfume they mentioned…)', 'aria-label': 'Gift idea', onKeydown: (e) => { if (e.key === 'Enter') addGift(); } });
   const addGift = () => { const t = giftAdd.value.trim(); if (!t) return; ctx.update(x => F.updateFriend(x, f.id, { gifts: [...(x.friends[f.id].gifts || []), { text: t, done: '' }] })); giftAdd.value = ''; refresh(); };
   const refresh = () => { close(); profileSheet(f); };
   const lastLine = st.lastContact ? `in touch ${relDay(fromKey(st.lastContact))}` : 'not in touch yet';
   const box = ctx.sheet([
     h('div', { class: 'pf-head' }, h('button', { class: 'pf-face', 'aria-label': 'Change their face', title: 'Change their face', onClick: () => { close(); editFace(f, () => profileSheet(f)); } }, ring(f, { size: 72 }), h('span', { class: 'pf-pen', 'aria-hidden': 'true' }, '✎')), h('div', { class: 'grow' }, h('h2', {}, f.nick || F.shortName(f)), h('div', { class: 'small muted' }, [f.nick && f.nick !== f.name ? f.name : '', kind, unit && unit !== kind ? `${unit} rota` : ''].filter(Boolean).join(', ')),
-      h('div', { class: `small ${od ? 'late' : 'muted'}` }, `${lastLine}${od ? ` · ${od > 60 ? 'long overdue' : `${days(od)} overdue`}` : ''}`))),
+      h('div', { class: `small ${od ? 'late' : 'muted'}` }, `${lastLine}${od ? ` · ${od > 60 ? 'long overdue' : `${days(od)} overdue`}` : ''}`), extra.circle)),
     SU.reach(f, ''),
     h('div', { class: 'pf-acts' },
       h('button', { class: 'btn primary', onClick: () => { close(); SU.inviteSheet([f.id]); } }, 'Invite'),
@@ -63,12 +65,14 @@ export function profileSheet(f) {
     today ? h('div', { class: 'small pf-today' }, `Today: ${today.kind === 'work' ? `working ${today.code}${today.start != null ? ` ${F.hhmm(today.start)}–${F.hhmm(today.end)}` : ''}` : today.kind === 'off' ? 'off' : today.kind === 'leave' ? 'on leave' : String(today.label || today.code).toLowerCase()}`) : null,
     h('section', { class: 'pf-sec' }, h('h3', {}, 'Free together'), free.length ? free.map(m => h('button', { class: 'pf-slot', onClick: () => { close(); SU.inviteSheet([f.id], m); } }, h('b', {}, SU.dayLabel(m.date)), h('span', {}, SU.win(m.window)), m.dayLong ? h('span', { class: 'chip sel' }, 'all day') : null))
       : h('div', { class: 'small muted' }, f.rotaKey || Object.keys(f.sched || {}).length || (f.weeklyOff || []).length ? 'No shared free time in the next 3 weeks.' : 'Link them to their rota row or add their days off to see this.')),
+    extra.sections[0],
     occ.length ? h('section', { class: 'pf-sec' }, h('h3', {}, 'Dates'), occ.map(b => h('div', { class: 'pf-row' }, h('span', { class: 'grow' }, `${b.label}${b.age ? ` (${b.birthday ? `turns ${b.age}` : `${b.age} years`})` : ''}`), h('span', { class: 'dim small' }, `${DAY_SHORT[b.date.getDay()]} ${b.date.getDate()} ${MONTHS[b.date.getMonth()].slice(0, 3)} · ${b.inDays === 0 ? 'today' : `in ${days(b.inDays)}`}`)))) : null,
     h('section', { class: 'pf-sec' }, h('h3', {}, 'Gift ideas'),
       gifts.filter(g => !g.done).map(g => h('div', { class: 'pf-row' }, h('span', { class: 'grow' }, g.text), h('button', { class: 'btn sm ghost', title: 'Mark as given', onClick: () => { ctx.update(x => F.logTouch(F.updateFriend(x, f.id, { gifts: (x.friends[f.id].gifts || []).map(y => y.id === g.id ? { ...y, done: keyOf(new Date()) } : y) }), { who: [f.id], kind: 'gift', note: g.text })); toast('Marked as given', 'ok'); refresh(); } }, 'Given'), h('button', { class: 'btn sm ghost', 'aria-label': `Remove ${g.text}`, onClick: () => { ctx.update(x => F.updateFriend(x, f.id, { gifts: (x.friends[f.id].gifts || []).filter(y => y.id !== g.id) })); refresh(); } }, '✕'))),
       h('div', { class: 'row pf-add' }, giftAdd, h('button', { class: 'btn sm', onClick: addGift }, 'Add')),
       gifts.some(g => g.done) ? h('div', { class: 'tiny dim' }, `Given before: ${gifts.filter(g => g.done).map(g => g.text).join(', ')}`) : null),
     bal ? h('section', { class: 'pf-sec' }, h('h3', {}, 'Money'), h('div', { class: 'pf-row' }, h('span', { class: `grow ${bal > 0 ? 'ok' : 'late'}` }, bal > 0 ? `${F.shortName(f)} owes you ${money(bal)}` : `You owe ${F.shortName(f)} ${money(bal)}`), h('button', { class: 'btn sm', onClick: () => settleSheet(f) }, 'Settle up'))) : null,
+    ...extra.sections.slice(1),
     f.notes ? h('section', { class: 'pf-sec' }, h('h3', {}, 'Notes'), h('div', { class: 'small fr-note' }, f.notes)) : null,
     h('section', { class: 'pf-sec' }, h('h3', {}, 'Together'), h('div', { class: 'tiny dim', style: { marginBottom: '6px' } }, `${st.total} meet-up${st.total === 1 ? '' : 's'}${st.thisYear ? ` (${st.thisYear} this year)` : ''} · ${st.touches} call${st.touches === 1 ? '' : 's'} and messages${st.favPlace ? ` · usually ${st.favPlace}` : ''}`),
       tl.length ? h('ol', { class: 'pf-tl' }, tl.map(e => h('li', { class: e.kind }, h('span', { class: 'pf-d' }, relDay(fromKey(e.date))), h('span', { class: 'grow' }, e.kind === 'touch' ? `${F.TOUCH_KINDS.find(k => k[0] === e.rec.kind)?.[2] || 'Touch'}${e.rec.note ? `: ${e.rec.note}` : ''}` : `${e.kind === 'plan' ? 'Planned: ' : ''}${e.rec.what || 'Meet-up'}${e.rec.where ? `, ${e.rec.where}` : ''}${e.rec.rating ? ' ' + '★'.repeat(e.rec.rating) : ''}`)))) : h('div', { class: 'small muted' }, 'Nothing yet. Log a meet-up or a call and it shows here.')),

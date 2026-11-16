@@ -24,6 +24,9 @@ function defaults() {
     wishlist: {},             // id -> place / trip / thing to try {name, kind, city, url, note, with[], done, at}
     treats: {},               // id -> something brought for the team {date, what, for, cost, at}
     touches: {},              // id -> a call / message / visit {who[], kind, date, note, at}   keeping in touch without meeting
+    life: {},                 // id -> a life event {who, kind, date, note, yearly, at}   new job, moved, baby, exam…
+    asks: {},                 // id -> something to ask or follow up {who, text, due?, done?, at}   "ask how the exam went"
+    ties: {},                 // id -> a family link {a, b, rel: parent (a is b's parent) | partner | sibling, at}; a/b: 'me', a friend id or 'p:<name>'
     deleted: {},              // tombstones 'friend:<id>' | 'contact:<key>' | 'outing:<id>' … -> time, so deletions survive merges
     stamps: {},               // edit times of values that have no `at` of their own: 'set:<k>'
     migrated: null,           // {from: 'citrus', at, counts} once the social parts of Citrus were taken over
@@ -37,11 +40,12 @@ function defaults() {
 // Map collections whose values are records (objects): collection -> tombstone prefix. The merge and the sanitizer both read this table,
 // so a collection added here is cleaned on load and merged record by record.
 export const RECORD_MAPS = {
-  friends: 'friend', contacts: 'contact', groups: 'group', outings: 'outing', polls: 'poll', wishlist: 'wish', treats: 'treat', touches: 'touch',
+  friends: 'friend', contacts: 'contact', groups: 'group', outings: 'outing', polls: 'poll', wishlist: 'wish', treats: 'treat', touches: 'touch', life: 'life', asks: 'ask', ties: 'tie',
 };
 // Fields the views use without checking (`.toLowerCase()`, `.filter()`): repaired to the right type rather than dropping the record.
 const FIELDS = {
   friends: { name: 's' }, touches: { who: 'a', date: 's' }, outings: { who: 'a', date: 's' }, polls: { slots: 'a', who: 'a' }, wishlist: { name: 's' }, treats: { what: 's', date: 's' }, groups: { members: 'a', name: 's' },
+  life: { who: 's', kind: 's', date: 's' }, asks: { who: 's', text: 's' }, ties: { a: 's', b: 's', rel: 's' },
 };
 const CELL_MAPS = [];                            // id -> dateKey -> cell record
 const NUM_MAPS = ['deleted', 'stamps'];          // key -> number

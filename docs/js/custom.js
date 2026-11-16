@@ -12,7 +12,7 @@ export const DEFAULTS = {
   me: { avatar: null },
 };
 /** The cards on Today, in their default order. Hide any; the faces row is the hero and always first. */
-export const SECTIONS = [['week', 'This week strip'], ['due', 'Did these happen?'], ['coming', 'Coming up'], ['reminders', 'Don’t let it slip'], ['polls', 'Open polls'], ['best', 'Best times to meet'], ['actions', 'Quick actions']];
+export const SECTIONS = [['week', 'This week strip'], ['due', 'Did these happen?'], ['coming', 'Coming up'], ['reminders', 'Don’t let it slip'], ['asks', 'Ask about'], ['memories', 'This week, years ago'], ['polls', 'Open polls'], ['best', 'Best times to meet'], ['actions', 'Quick actions']];
 export const FACE_SHOW = [['free', 'Who is free today'], ['favs', 'Favourites only'], ['pinned', 'Only people I pin']];
 export const FACE_SORT = [['free', 'Free soonest'], ['longest', 'Most time together'], ['overdue', 'Most overdue'], ['name', 'Name'], ['manual', 'My own order']];
 export const ACCENTS = [['clementine', 'Clementine', '#ff6a3d'], ['peach', 'Peach', '#ff9466'], ['berry', 'Berry', '#ff4f8b'], ['lime', 'Lime', '#8fd14f'], ['sky', 'Sky', '#4fb4ff'], ['grape', 'Grape', '#a77bff']];

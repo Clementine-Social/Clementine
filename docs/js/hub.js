@@ -7,6 +7,7 @@ import * as F from './social.js';
 import * as X from './extras.js';
 import * as CZ from './custom.js';
 import * as R from './roster.js';
+import * as L from './life.js';
 
 export const SITE_URL = 'https://clementine-social.github.io/Clementine/';
 export const CONTRACT = 2;
@@ -38,9 +39,11 @@ export function buildStatus(s, now = new Date(), { busyOf = () => [] } = {}) {
   if (due.length) pending.push(`${due.length} outing${due.length > 1 ? 's' : ''} to confirm`);
   if (od.length) pending.push(`${od.length} friend${od.length > 1 ? 's' : ''} overdue for a meet-up`);
   for (const { p, r } of waiting.slice(0, 2)) pending.push(`Poll “${p.title}”: waiting on ${r.waiting.length}`);
+  const asks = L.asksNow(s, now); for (const x of asks.slice(0, 3)) pending.push(`Ask ${F.shortName(x.f)}: ${x.a.text}`);
   const tn = X.treatNudge(s, now); if (tn?.due) pending.push(`Team treat: ${days(tn.since)} since the last one`);
   // a birthday a few days ahead becomes a task Citrus can offer (stable id per person and year: never offered twice)
   const inbox = soonB.slice(0, 6).map(b => ({ id: `bday-${String(b.key).replace(/[^\w:-]/g, '').slice(0, 40)}-${b.date.getFullYear()}`, type: 'task', title: b.birthday ? `Wish ${b.name} a happy birthday${b.age ? ` (${b.age})` : ''}` : `${b.name}: ${b.label}${b.age ? ` (${b.age} years)` : ''}`, date: keyOf(b.date), minutes: 5, pri: 2, url: `${SITE_URL}?do=birthdays`, expires: keyOf(addDays(b.date, 1)) }));
+  for (const x of asks.filter(x => x.why === 'due').slice(0, 4)) inbox.push({ id: `ask-${x.a.id}`, type: 'task', title: `Ask ${F.shortName(x.f)}: ${x.a.text}`.slice(0, 120), date: x.a.due, minutes: 5, pri: 3, url: SITE_URL });
   const y = String(now.getFullYear()), m = keyOf(now).slice(0, 7), t = keyOf(now), seen = F.outingList(s).filter(o => !o.planned && o.date <= t);
   const touched = F.touchList(s).filter(x => x.date.startsWith(m)).length;
   const metrics = [
@@ -50,6 +53,7 @@ export function buildStatus(s, now = new Date(), { busyOf = () => [] } = {}) {
     { key: 'friends-overdue', label: 'Friends overdue', value: od.length, goal: 0, unit: 'friends', date: t },
     { key: 'friends', label: 'Friends', value: friends.length, unit: 'people', date: t },
   ];
+  metrics.push({ key: 'week-streak', label: 'Weeks in a row in touch with someone', value: L.weekStreak(s, now), unit: 'weeks', date: t });
   if (polls.length) metrics.push({ key: 'polls-open', label: 'Open polls', value: polls.length, unit: 'polls', date: t });
   const next = up[0] ? { title: `${up[0].what || 'Meet-up'} with ${names(up[0].who).join(', ') || 'friends'}`, minutes: 120, ...(up[0].start != null ? { at: new Date(+fromKey(up[0].date) + up[0].start * 60000).toISOString() } : {}) }
     : best ? { title: `Invite ${names(best.who).slice(0, 3).join(', ')} (${dayWord(best.date, now)} ${F.hhmm(best.window[0])})`, minutes: 5 } : null;

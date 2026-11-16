@@ -52,6 +52,12 @@ export const fmtBirthday = (b) => { const p = String(b || '').split('-'); return
 // ───────────────────────────── friend records (merge per record by `at`, like everything else)
 export const FRIEND_KINDS = [{ id: 'gp', label: 'GP colleague' }, { id: 'nurse', label: 'Nurse / shifts' }, { id: 'colleague', label: 'Other colleague' }, { id: 'family', label: 'Family' }, { id: 'other', label: 'Friend' }];
 const KIND_IDS = FRIEND_KINDS.map(k => k.id);
+/** Circles of closeness (after Dunbar: about 5 closest, 15 close, 50 friends, 150 wider), each with a default keep-in-touch gap.
+ *  [id, label, icon, days, hint]. A friend's own "every" wins over their circle's. */
+export const CIRCLES = [['inner', 'Inner circle', '💛', 7, 'Your closest few, the ones you would call at 3am'], ['close', 'Close friends', '🧡', 21, 'You see them often and tell them things'], ['friends', 'Friends', '💚', 45, 'Good company, every month or so'], ['wider', 'Wider circle', '💙', 90, 'People you like to catch up with now and then']];
+const CIRCLE_IDS = CIRCLES.map(c => c[0]);
+/** Days you want between catch-ups: theirs, else their circle's, else 0 (no reminder). */
+export const cadence = (f) => +f?.every || CIRCLES.find(c => c[0] === f?.circle)?.[3] || 0;
 export const SHIFT_CODES = [{ id: 'D', label: 'Day' }, { id: 'E', label: 'Evening' }, { id: 'N', label: 'Night' }, { id: 'off', label: 'Off' }, { id: 'leave', label: 'Leave' }];
 // Hours for shifts entered by hand when neither the friend nor their rota says otherwise. Nurses here work 12h D/N.
 const DEFAULT_HOURS = { D: [7 * 60, 19 * 60], E: [13 * 60, 22 * 60], N: [19 * 60, 7 * 60] };
@@ -79,7 +85,7 @@ export function addFriend(s, f) {
   const name = String(f.name || '').trim().slice(0, 60); if (!name) return s; const id = f.id || uid();
   const fr = { id, name, nick: String(f.nick || '').slice(0, 30), kind: KIND_IDS.includes(f.kind) ? f.kind : 'other', phone: asciiDigits(f.phone || '').slice(0, 24), whatsapp: asciiDigits(f.whatsapp || '').slice(0, 24), snap: cleanHandle(f.snap), insta: cleanHandle(f.insta),
     rotaKey: /^(id|name):/.test(f.rotaKey || '') ? f.rotaKey : '', place: String(f.place || '').slice(0, 60), birthday: parseBirthday(f.birthday), every: Math.max(0, Math.min(365, +f.every || 0)), notes: String(f.notes || '').slice(0, 500),
-    sched: cleanSched(f.sched), avatar: cleanAvatar(f.avatar), onToday: ['always', 'never'].includes(f.onToday) ? f.onToday : 'auto', dates: cleanDates(f.dates), gifts: cleanGifts(f.gifts), weeklyOff: Array.isArray(f.weeklyOff) ? [...new Set(f.weeklyOff.map(Number).filter(n => n >= 0 && n <= 6))] : [], hours: cleanHours(f.hours), fav: !!f.fav, createdAt: f.createdAt || Date.now(), at: Date.now() };
+    sched: cleanSched(f.sched), avatar: cleanAvatar(f.avatar), onToday: ['always', 'never'].includes(f.onToday) ? f.onToday : 'auto', dates: cleanDates(f.dates), gifts: cleanGifts(f.gifts), weeklyOff: Array.isArray(f.weeklyOff) ? [...new Set(f.weeklyOff.map(Number).filter(n => n >= 0 && n <= 6))] : [], hours: cleanHours(f.hours), circle: CIRCLE_IDS.includes(f.circle) ? f.circle : '', met: String(f.met || '').slice(0, 160), food: String(f.food || '').slice(0, 160), fav: !!f.fav, createdAt: f.createdAt || Date.now(), at: Date.now() };
   const s2 = { ...s, friends: { ...(s.friends || {}), [id]: fr } };
   // a colleague who becomes a friend: their friend record is now their card, so the separate card goes (with a tombstone)
   if (fr.rotaKey && s2.contacts?.[fr.rotaKey]) { const contacts = { ...s2.contacts }; delete contacts[fr.rotaKey]; return { ...s2, contacts, deleted: { ...(s2.deleted || {}), [`contact:${fr.rotaKey}`]: Date.now() } }; }
@@ -98,6 +104,10 @@ export function deleteFriend(s, id, { drop = false } = {}) {
   touchRecs('wishlist', (w) => w.with?.includes(id) ? { ...w, with: w.with.filter(x => x !== id) } : w);
   touchRecs('outings', (o) => o.who?.includes(id) ? { ...o, gone: { ...(o.gone || {}), [id]: name } } : o);
   touchRecs('touches', (t) => t.who?.includes(id) ? { ...t, gone: { ...(t.gone || {}), [id]: name } } : t);
+  // their family links stay in the tree under their name; open things to ask them go; life events keep their name
+  touchRecs('ties', (t) => t.a === id || t.b === id ? { ...t, a: t.a === id ? `p:${R.bare(f.name)}` : t.a, b: t.b === id ? `p:${R.bare(f.name)}` : t.b } : t);
+  touchRecs('life', (l) => l.who === id ? { ...l, gone: name } : l);
+  for (const [k, a] of Object.entries(out.asks || {})) if (a.who === id) { const asks = { ...out.asks }; delete asks[k]; out = { ...out, asks, deleted: { ...out.deleted, [`ask:${k}`]: now } }; }
   if (!drop && f.rotaKey && (f.phone || f.whatsapp || f.snap || f.insta || f.birthday)) out = setContact(out, f.rotaKey, { phone: f.phone, whatsapp: f.whatsapp, snap: f.snap, insta: f.insta, birthday: f.birthday, note: '' });
   return out;
 }
@@ -224,6 +234,7 @@ export function logOuting(s, o, now = new Date()) {
   if (bring.length) out.bring = bring; if (cost) out.cost = cost;
   if (o.gone && typeof o.gone === 'object') out.gone = Object.fromEntries(Object.entries(o.gone).slice(0, 20).map(([k, v]) => [k, String(v).slice(0, 40)]));
   if (o.fromPoll) out.fromPoll = String(o.fromPoll).slice(0, 40);
+  if (o.rsvp && typeof o.rsvp === 'object') { const r = Object.fromEntries(Object.entries(o.rsvp).filter(([k, v]) => out.who.includes(k) && ['yes', 'maybe', 'no'].includes(v))); if (Object.keys(r).length) out.rsvp = r; }
   return { ...s, outings: { ...(s.outings || {}), [id]: out } };
 }
 /** Who brings what to a gathering: [{id, item, who ('me' | friend id | ''), done}]. */
@@ -278,8 +289,8 @@ export const outingList = (s) => rec(s.outings).sort((a, b) => b.date.localeComp
 export function lastSeen(s, id, now = new Date()) { const t = keyOf(now); const l = outingList(s).filter(o => !o.planned && o.date <= t && o.who.includes(id))[0]; return l ? l.date : ''; }
 /** Days past the gap you said you want (0 if you set none or are on time). */
 export function overdue(s, f, now = new Date()) {
-  if (!f.every) return 0; const ls = lastContact(s, f.id, now), since = ls ? Math.round((startOfDay(now) - fromKey(ls)) / 864e5) : Math.round((startOfDay(now) - startOfDay(new Date(f.createdAt || now))) / 864e5);
-  return Math.max(0, since - f.every);
+  const every = cadence(f); if (!every) return 0; const ls = lastContact(s, f.id, now), since = ls ? Math.round((startOfDay(now) - fromKey(ls)) / 864e5) : Math.round((startOfDay(now) - startOfDay(new Date(f.createdAt || now))) / 864e5);
+  return Math.max(0, since - every);
 }
 export function friendStats(s, f, now = new Date()) {
   const y = String(now.getFullYear()), t = keyOf(now), all = outingList(s).filter(o => !o.planned && o.date <= t && o.who.includes(f.id)), yr = all.filter(o => o.date.startsWith(y)), rated = all.filter(o => o.rating);

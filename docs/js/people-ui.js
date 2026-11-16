@@ -6,12 +6,13 @@ import * as F from './social.js';
 import * as R from './roster.js';
 import * as SU from './social-ui.js';
 import * as PE from './person-ui.js';
+import * as LU from './life-ui.js';
 
 let ctx = null, seg = 'friends', query = '', unit = 'all', showN = 60;
 export function initPeople(c) { ctx = c; }
 const S = () => ctx.S();
 const { field } = SU;
-export const peoplePart = (p) => { if (['friends', 'colleagues', 'birthdays', 'groups'].includes(p)) seg = p; };
+export const peoplePart = (p) => { if (['friends', 'circles', 'family', 'colleagues', 'birthdays', 'groups'].includes(p)) seg = p; };
 const days = (n) => `${n} day${n === 1 ? '' : 's'}`;
 const shiftWords = (sh) => !sh ? 'no rota' : sh.kind === 'work' ? `${sh.code}${sh.start != null ? ` ${F.hhmm(sh.start)}–${F.hhmm(sh.end)}` : ''}` : sh.kind === 'off' ? 'off' : sh.kind === 'leave' ? 'leave' : String(sh.label || sh.code || 'away').toLowerCase();
 const has = (v, q) => String(v || '').toLowerCase().includes(q);
@@ -126,7 +127,7 @@ function groupsSeg() {
     h('button', { class: 'btn', onClick: () => F.friendList(s).length ? groupSheet(null) : toast('Add some friends first', 'err') }, '+ New group')];
 }
 export function renderPeople() {
-  const SEGS = [['friends', 'Friends'], ['colleagues', 'Colleagues'], ['birthdays', 'Birthdays'], ['groups', 'Groups']];
-  const body = SU.safe(SEGS.find(x => x[0] === seg)?.[1] || 'People', () => seg === 'colleagues' ? colleaguesSeg() : seg === 'birthdays' ? birthdaysSeg() : seg === 'groups' ? groupsSeg() : friendsSeg());
-  return [h('h1', {}, 'People'), h('div', { class: 'seg', role: 'tablist' }, SEGS.map(([id, l]) => h('button', { class: seg === id ? 'active' : '', role: 'tab', 'aria-selected': seg === id ? 'true' : 'false', onClick: () => { if (seg !== id) { seg = id; query = ''; showN = 60; } ctx.render(); } }, l))), ...[body].flat(Infinity)];
+  const SEGS = [['friends', 'Friends'], ['circles', 'Circles'], ['family', 'Trees'], ['colleagues', 'Colleagues'], ['birthdays', 'Birthdays'], ['groups', 'Groups']];
+  const body = SU.safe(SEGS.find(x => x[0] === seg)?.[1] || 'People', () => seg === 'circles' ? LU.circlesView() : seg === 'family' ? LU.treesView() : seg === 'colleagues' ? colleaguesSeg() : seg === 'birthdays' ? birthdaysSeg() : seg === 'groups' ? groupsSeg() : friendsSeg());
+  return [h('h1', {}, 'People'), h('div', { class: 'seg scroll', role: 'tablist' }, SEGS.map(([id, l]) => h('button', { class: seg === id ? 'active' : '', role: 'tab', 'aria-selected': seg === id ? 'true' : 'false', onClick: () => { if (seg !== id) { seg = id; query = ''; showN = 60; } ctx.render(); } }, l))), ...[body].flat(Infinity)];
 }

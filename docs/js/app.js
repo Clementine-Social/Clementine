@@ -13,11 +13,12 @@ import * as SU from './social-ui.js';
 import * as PU from './people-ui.js';
 import * as XU from './plans-ui.js';
 import * as PE from './person-ui.js';
+import * as LU from './life-ui.js';
 import * as AV from './avatar.js';
 import { checkBackup, describeCounts } from './backup-check.js';
 import { h, toast, keyOf, fromKey, addDays, startOfDay, fmtDate, pad2, DAY_NAMES, MONTHS, uid } from './util.js';
 
-export const VERSION = '1.2.1';
+export const VERSION = '1.3.0';
 const CITRUS_URL = 'https://amaerys.github.io/citrus-maxima/';
 const MANDARIN_URL = 'https://mandarin-work.github.io/Mandarin/';
 
@@ -63,7 +64,7 @@ async function boot() {
   window.addEventListener('online', () => { rt.online = true; renderSync(); flushOutbox().then(render).catch(() => {}); });
   window.addEventListener('offline', () => { rt.online = false; renderSync(); });
   const sub = { S, update: (fn) => store.update(fn), revert: store.revert, sheet: (c) => sheet(c), render: () => render(), go: (v, p) => go(v, p), busyOf, addEvent, removeEvent, editMe, cheer, googleBirthdays: () => G.listBirthdays(), signedIn: () => G.isSignedIn() || G.wasSignedIn(), personSheet: (k) => PU.personSheet(k), freePart: SU.freePart };
-  SU.initSocial(sub); PU.initPeople(sub); XU.initPlans(sub); PE.initPerson(sub);
+  SU.initSocial(sub); PU.initPeople(sub); XU.initPlans(sub); PE.initPerson(sub); LU.initLife(sub);
   store.subscribe(() => { applyTiming(); render(); publishSoon(); });
   store.onRemoteSync(scheduleRemoteSave);
   loadCachedEvents(); R.load(); loadHubCache();
