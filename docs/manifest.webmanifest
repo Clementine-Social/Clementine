@@ -1,0 +1,98 @@
+{
+  "id": "./",
+  "name": "Clementine",
+  "short_name": "Clementine",
+  "description": "Your people and when you can see them: contact cards, who is free around your shifts, meet-ups, polls and birthdays. The social app of the citrus family.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "social",
+    "lifestyle"
+  ],
+  "background_color": "#12141f",
+  "theme_color": "#12141f",
+  "shortcuts": [
+    {
+      "name": "Who is free",
+      "short_name": "Who is free",
+      "url": "./index.html#free",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Find a day",
+      "short_name": "Find a day",
+      "url": "./index.html?do=find",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Plan a meet-up",
+      "short_name": "Plan a meet-up",
+      "url": "./index.html?do=invite",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Log an outing",
+      "short_name": "Log an outing",
+      "url": "./index.html?do=log",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
