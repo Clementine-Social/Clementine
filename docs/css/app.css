@@ -1082,3 +1082,4 @@ input[type=range] { width: 100%; accent-color: var(--orange); }
 .confetti { position: fixed; z-index: 9999; width: 8px; height: 12px; border-radius: 2px; pointer-events: none; animation: pop 1s cubic-bezier(.2, .7, .3, 1) forwards; }
 @keyframes pop { 0% { transform: translate(-50%, -50%) rotate(0) scale(1); opacity: 1; } 100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy) + 80px)) rotate(var(--r)) scale(.8); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .confetti { display: none; } :root[data-fun="on"] .btn, :root[data-fun="on"] .td-face .ring { transition: none; } }
+.gb-list { max-height: 50vh; overflow: auto; margin: 10px 0; } .gb-row .meta.late { color: var(--late, #ff8a7a); } .gb-loose { margin-top: 8px; }

@@ -76,6 +76,28 @@ function colleaguesSeg() {
     h('div', { class: 'list' }, rows.slice(0, showN).map(row)), rows.length > showN ? h('button', { class: 'btn ghost', onClick: () => { showN += 200; ctx.render(); } }, `Show ${rows.length - showN} more`) : null,
     q && !rows.length ? h('div', { class: 'empty small' }, `Nobody called “${query}” in the roster.`) : null];
 }
+/** Birthdays from Google: read the birthday events Google Calendar makes from your Google Contacts, match them, review, save. */
+export async function googleBirthdaysSheet() {
+  if (!ctx.signedIn()) return toast('Sign in with Google first (Settings)', 'err');
+  const wrap = h('div', {}, h('div', { class: 'small muted' }, 'Reading the birthdays in your Google Calendar…'));
+  const box = ctx.sheet([h('h2', {}, 'Birthdays from Google'), wrap]);
+  let items; try { items = await ctx.googleBirthdays(); } catch (e) { wrap.replaceChildren(h('div', { class: 'small late' }, e.message)); return; }
+  if (!items.length) { wrap.replaceChildren(h('p', { class: 'small' }, 'Google Calendar has no birthdays for you yet.'), h('p', { class: 'small muted' }, 'Calendar makes them from your Google Contacts: add birthdays there (contacts.google.com) and turn on Calendar › Settings › Birthdays, then try again. Contacts kept only on the phone (not in Google) don’t show up.')); return; }
+  const ms = F.matchBirthdays(S(), items), pick = new Set(ms.map((m, i) => (m.status === 'new' && !m.fuzzy) ? i : -1).filter(i => i >= 0)), addNew = new Set();
+  const fmt = (d) => F.fmtBirthday(d);
+  const row = (m, i) => h('label', { class: 'item gb-row' }, h('input', { type: 'checkbox', checked: pick.has(i), disabled: m.status === 'same', onChange: (e) => { e.target.checked ? pick.add(i) : pick.delete(i); } }),
+    h('div', { class: 'grow' }, h('div', { class: 'name' }, `${m.item.name}`, h('span', { class: 'dim' }, ` → ${m.target.name}${m.target.kind === 'contact' ? ' (colleague)' : ''}`)),
+      h('div', { class: `meta ${m.status === 'differs' ? 'late' : ''}` }, `${m.item.label} ${fmt(m.item.date)}${m.status === 'same' ? ' · already saved' : m.status === 'differs' ? ` · you have ${fmt(m.current)}` : ''}${m.fuzzy ? ' · check the name matches' : ''}`)));
+  const matched = ms.map((m, i) => [m, i]).filter(([m]) => m.target), loose = ms.map((m, i) => [m, i]).filter(([m]) => !m.target && m.item.kind === 'birthday');
+  wrap.replaceChildren(h('div', { class: 'small muted' }, `Found ${items.length}. Ticked ones are saved; ones that differ from what you have are left unticked.`),
+    matched.length ? h('div', { class: 'list gb-list' }, matched.map(([m, i]) => row(m, i))) : h('div', { class: 'small muted' }, 'None matched your friends or colleagues by name.'),
+    loose.length ? h('details', { class: 'gb-loose' }, h('summary', { class: 'small' }, `${loose.length} not in Clementine — add some as friends?`), h('div', { class: 'chips', style: { marginTop: '8px' } }, loose.map(([m, i]) => h('button', { class: 'chip', 'aria-pressed': 'false', onClick: (e) => { addNew.has(i) ? addNew.delete(i) : addNew.add(i); e.currentTarget.classList.toggle('sel', addNew.has(i)); e.currentTarget.setAttribute('aria-pressed', String(addNew.has(i))); } }, `${m.item.name} · ${fmt(m.item.date)}`)))) : null,
+    h('div', { class: 'row wrap', style: { marginTop: '12px' } }, h('button', { class: 'btn primary grow', onClick: (e) => {
+      const chosen = [...pick].map(i => ms[i]), adds = [...addNew].map(i => ms[i].item);
+      if (!chosen.length && !adds.length) return toast('Tick at least one', 'err');
+      ctx.cheer(e.currentTarget); ctx.update(x => adds.reduce((y, it) => F.addFriend(y, { name: it.name, birthday: it.date, kind: 'other', every: 30 }), F.applyBirthdays(x, chosen)));
+      box.close(); toast(`Saved ${chosen.length} date${chosen.length === 1 ? '' : 's'}${adds.length ? `, added ${adds.length} friend${adds.length === 1 ? '' : 's'}` : ''}`, 'ok'); } }, 'Save ticked')));
+}
 function birthdaysSeg() {
   const s = S(), list = F.birthdays(s, new Date(), 366), missing = F.friendList(s).filter(f => !f.birthday);
   const byMonth = new Map(); for (const b of list) { const k = `${b.date.getFullYear()}-${b.date.getMonth()}`; if (!byMonth.has(k)) byMonth.set(k, []); byMonth.get(k).push(b); }
@@ -84,7 +106,8 @@ function birthdaysSeg() {
   const row = (b) => h('div', { class: 'row nudge clickable', onClick: () => b.friend ? PE.profileSheet(b.friend) : personSheet(b.key) }, b.friend ? PE.ring(b.friend, { size: 36 }) : h('span', { class: 'ch-ic sm' }, b.birthday ? '🎂' : '📅'),
     h('div', { class: 'grow' }, h('div', { class: 'name' }, b.birthday ? b.name : `${b.name}: ${b.label}`, b.age ? h('span', { class: 'dim' }, b.birthday ? ` turns ${b.age}` : ` (${b.age} years)`) : null), h('div', { class: 'tiny dim' }, when(b))), plan(b));
   const months = [...byMonth.values()].map(l => h('div', { class: 'card' }, h('div', { class: 'title' }, `${MONTHS[l[0].date.getMonth()]} ${l[0].date.getFullYear()}`), l.map(row)));
-  return [list.length ? months : h('div', { class: 'card small muted' }, 'No birthdays saved yet. Add them on friends’ and colleagues’ cards (14/03, or 14/03/1990 to see their age).'),
+  return [h('div', { class: 'row wrap', style: { marginBottom: '10px' } }, h('button', { class: 'btn sm primary', onClick: googleBirthdaysSheet }, 'Get birthdays from Google'), h('span', { class: 'tiny dim grow' }, 'From your Google Contacts, via Calendar. You review before anything is saved.')),
+    list.length ? months : h('div', { class: 'card small muted' }, 'No birthdays saved yet. Get them from Google above, or add them on friends’ and colleagues’ cards (14/03, or 14/03/1990 to see their age).'),
     missing.length ? h('details', { class: 'card' }, h('summary', { class: 'small' }, `No birthday saved for ${missing.length} friend${missing.length > 1 ? 's' : ''}`), h('div', { class: 'chips', style: { marginTop: '8px' } }, missing.map(f => h('button', { class: 'chip', onClick: () => SU.friendSheet(f) }, F.shortName(f))))) : null];
 }
 function groupSheet(g) {

@@ -172,6 +172,31 @@ export async function listEvents(calendarId, from, to) {
   } while (page);
   return out;
 }
+/** Birthdays and other special dates Google Calendar makes from your Google Contacts (eventType "birthday").
+ *  → [{name, date: 'YYYY-MM-DD' | 'MM-DD', kind: 'birthday' | 'anniversary' | 'custom' | 'other' | 'self', label, contact}] */
+export async function listBirthdays() {
+  const out = [], seen = new Set(), thisYear = new Date().getFullYear();
+  const clean = (t) => String(t || '').replace(/[’']s\s+(birthday|anniversary)$/i, '').replace(/\s+(birthday|anniversary)$/i, '').replace(/^(birthday|anniversary)\s*(of|:)?\s*/i, '').replace(/^عيد ميلاد\s*/, '').trim();
+  for (const cal of ['primary', 'addressbook#contacts@group.v.calendar.google.com']) {
+    let page = '';
+    try {
+      do {
+        const q = new URLSearchParams({ maxResults: '2500', ...(cal === 'primary' ? { eventTypes: 'birthday' } : {}), ...(page ? { pageToken: page } : {}) });
+        const j = await gfetch(`${CAL}/calendars/${encodeURIComponent(cal)}/events?${q}`);
+        for (const e of j.items || []) {
+          if (e.status === 'cancelled' || !e.start?.date) continue;
+          const bp = e.birthdayProperties || {}, kind = bp.type || 'birthday', name = clean(e.summary); if (!name || kind === 'self') continue;
+          // the first occurrence carries the year only when the contact has one; keep it only when it looks like a real year
+          const y = +e.start.date.slice(0, 4), md = e.start.date.slice(5), year = (kind === 'birthday' || kind === 'anniversary') && y > 1925 && y < thisYear && y !== 1970 ? y : 0;
+          const key = `${name.toLowerCase()}|${md}|${kind}`; if (seen.has(key)) continue; seen.add(key);
+          out.push({ name, date: year ? `${year}-${md}` : md, kind, label: kind === 'anniversary' ? 'Anniversary' : kind === 'custom' ? (bp.customTypeName || 'Special date') : kind === 'other' ? 'Special date' : 'Birthday', contact: bp.contact || '' });
+        }
+        page = j.nextPageToken || '';
+      } while (page);
+    } catch (err) { if (err.auth) throw err; }   // the old Contacts calendar may not exist on this account: fine
+  }
+  return out;
+}
 function normalizeEvent(e, calendarId) {
   const allDay = !!e.start?.date;
   const start = allDay ? new Date(e.start.date + 'T00:00:00') : new Date(e.start.dateTime);

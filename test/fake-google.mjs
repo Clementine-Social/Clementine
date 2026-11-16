@@ -118,9 +118,10 @@ export function createFakeGoogle({ email = 'tester@example.com' } = {}) {
     if ((m = /^\/calendar\/v3\/calendars\/([^/]+)\/events$/.exec(p))) {
       const cal = calendars.get(decodeURIComponent(m[1])); if (!cal) return json(route, 404, { error: { message: 'Not Found' } });
       if (method === 'GET') {
-        const a = new Date(url.searchParams.get('timeMin')), b = new Date(url.searchParams.get('timeMax'));
-        const pk = /^key=(.*)$/.exec(url.searchParams.get('privateExtendedProperty') || '');
-        return json(route, 200, { items: [...cal.events.values()].filter(e => new Date(e.end.dateTime || e.end.date) > a && new Date(e.start.dateTime || e.start.date) < b && (!pk || e.extendedProperties?.private?.key === pk[1])) });
+        const a = url.searchParams.get('timeMin') ? new Date(url.searchParams.get('timeMin')) : new Date(0), b = url.searchParams.get('timeMax') ? new Date(url.searchParams.get('timeMax')) : new Date(8.64e15);
+        const pk = /^key=(.*)$/.exec(url.searchParams.get('privateExtendedProperty') || ''), types = url.searchParams.getAll('eventTypes');
+        // birthday events recur yearly: a time window always includes them (like the real API's expansion would)
+        return json(route, 200, { items: [...cal.events.values()].filter(e => (e.eventType === 'birthday' || (new Date(e.end.dateTime || e.end.date) > a && new Date(e.start.dateTime || e.start.date) < b)) && (!pk || e.extendedProperties?.private?.key === pk[1]) && (!types.length || types.includes(e.eventType || 'default'))) });
       }
       if (method === 'POST') { const e = { ...JSON.parse(req.postData()), id: id('ev'), status: 'confirmed', htmlLink: 'https://calendar.google.com/x' }; cal.events.set(e.id, e); return json(route, 200, e); }
     }

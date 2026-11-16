@@ -302,6 +302,39 @@ export function birthdays(s, now = new Date(), days = 45, { others = true } = {}
 /** "Annie's birthday", "Annie: wedding anniversary". */
 export const occasionName = (b) => b.birthday ? `${b.name}'s birthday` : `${b.name}: ${b.label}`;
 
+// ───────────── birthdays from Google (Calendar's birthday events, made from Google Contacts)
+const simple = (n) => R.bare(n).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9؀-ۿ ]/g, ' ').replace(/\s+/g, ' ').trim();
+/** Match Google's birthdays to your people. → [{item, target: {kind:'friend', id, name} | {kind:'contact', key, name} | null, current, status, fuzzy}]
+ *  status: 'new' (nothing saved yet), 'same', 'differs' (you have another date saved), 'nomatch'. */
+export function matchBirthdays(s, items) {
+  const fr = friendList(s);
+  return items.map(item => {
+    const n = simple(item.name); let target = null, fuzzy = false;
+    const f = fr.find(x => simple(x.name) === n || (x.nick && simple(x.nick) === n)) || fr.find(x => { const a = simple(x.name).split(' '), b = n.split(' '); return b.length > 1 && a[0] === b[0] && a[a.length - 1] === b[b.length - 1]; });
+    if (f) target = { kind: 'friend', id: f.id, name: shortName(f) };
+    else { const m = R.match(item.name); if (m.length === 1 || (m.length > 1 && m[0].score - m[1].score > 0.2)) { const fk = fr.find(x => x.rotaKey === m[0].key); target = fk ? { kind: 'friend', id: fk.id, name: shortName(fk) } : { kind: 'contact', key: m[0].key, name: R.bare(m[0].name) }; fuzzy = !!m[0].fuzzy; } }
+    if (!target) return { item, target: null, current: '', status: 'nomatch', fuzzy: false };
+    const rec = target.kind === 'friend' ? s.friends[target.id] : s.contacts?.[target.key] || {};
+    const current = item.kind === 'birthday' ? (rec.birthday || '') : ((rec.dates || []).find(d => d.label.toLowerCase() === item.label.toLowerCase())?.date || '');
+    const same = current && current.slice(-5) === item.date.slice(-5);
+    return { item, target, current, status: !current ? 'new' : same ? 'same' : 'differs', fuzzy };
+  });
+}
+/** Save the picked matches: birthdays on friends and colleagues' cards, other dates on friends. A saved year is kept when Google has none. */
+export function applyBirthdays(s, picked) {
+  let out = s;
+  for (const m of picked) {
+    if (!m.target) continue;
+    const keepYear = (cur, nw) => nw.length === 5 && /^\d{4}-/.test(cur || '') && cur.slice(-5) === nw ? cur : nw;
+    if (m.target.kind === 'friend') {
+      const f = out.friends[m.target.id]; if (!f) continue;
+      if (m.item.kind === 'birthday') out = updateFriend(out, f.id, { birthday: keepYear(f.birthday, m.item.date) });
+      else { const dates = (f.dates || []).filter(d => d.label.toLowerCase() !== m.item.label.toLowerCase()); out = updateFriend(out, f.id, { dates: [...dates, { label: m.item.label, date: m.item.date }] }); }
+    } else if (m.item.kind === 'birthday') { const c = out.contacts?.[m.target.key] || {}; out = setContact(out, m.target.key, { ...c, birthday: keepYear(c.birthday, m.item.date), name: m.target.name }); }
+  }
+  return out;
+}
+
 /** Your free time in the next days as text to paste into a group chat ("I'm free: Thu 19 from 20:45, Sat 21 all day…"). */
 export function availabilityText(s, { days = 14, busyOf = () => [], now = new Date(), fmtDay = (d) => keyOf(d), minMin = 120 } = {}) {
   const start = startOfDay(now), lines = [];

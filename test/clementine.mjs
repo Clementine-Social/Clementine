@@ -148,6 +148,16 @@ check(F.cleanAvatar({ type: 'char', char: { top: 'ghutra', eyes: 'nope' } }).cha
 check(F.updateFriend(s, 'fa', { name: 'Ann' }).friends.fa.avatar === s.friends.fa.avatar, 'editing a friend keeps their face');
 check(!HUB.buildContacts(F.updateFriend(s, 'fa', { avatar: { type: 'photo', photo: 'data:image/webp;base64,AAAA' } })).friends.fa?.avatar, 'photos never go into contacts.json');
 
+console.log('birthdays from Google');
+const gm = F.matchBirthdays(s, [{ name: 'Ann Able', date: '11-20', kind: 'birthday', label: 'Birthday' }, { name: 'Nina Nurse', date: '1992-05-05', kind: 'birthday', label: 'Birthday' }, { name: 'Mohammed Mari', date: '03-03', kind: 'birthday', label: 'Birthday' }, { name: 'Nobody Here', date: '01-01', kind: 'birthday', label: 'Birthday' }]);
+check(gm[0].status === 'differs' && gm[1].status === 'new' && gm[1].target.id === 'fn', 'a different saved date is flagged; a missing one is new');
+check(gm[2].target?.kind === 'contact' && gm[2].target.key === 'id:9' && gm[2].fuzzy, 'a colleague matched by a spelling variant is flagged to check');
+check(gm[3].status === 'nomatch', 'someone unknown is not matched');
+const ga = F.applyBirthdays(s, [gm[1], gm[2]]);
+check(ga.friends.fn.birthday === '1992-05-05' && ga.contacts['id:9'].birthday === '03-03', 'saved on the friend and on the colleague’s card');
+const keep = F.applyBirthdays(F.updateFriend(s, 'fa', { birthday: '1990-11-20' }), [{ item: { name: 'Ann', date: '11-20', kind: 'birthday', label: 'Birthday' }, target: { kind: 'friend', id: 'fa' } }]);
+check(keep.friends.fa.birthday === '1990-11-20', 'a saved year is kept when Google has none');
+
 console.log('hub files');
 const st = HUB.buildStatus(s, NOW);
 check(st.app === 'clementine' && st.contract === 2 && /Zed's birthday today/.test(st.summary), `summary: ${st.summary}`);

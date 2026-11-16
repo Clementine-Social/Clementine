@@ -16,6 +16,9 @@ const citrusState = { updatedAt: at, me: { id: '1', name: 'Dr Test Me' }, rotas:
 const g = createFakeGoogle();
 g.put('state.json', g.path(['My Apps', 'hub', 'citrus']), citrusState);
 g.put('shifts.json', g.path(['My Apps', 'hub', 'mandarin']), shifts);
+// birthdays Google Calendar made from (made-up) Google Contacts
+const bday = (summary, date, type = 'birthday', extra = {}) => ({ summary, eventType: 'birthday', start: { date }, end: { date }, recurrence: ['RRULE:FREQ=YEARLY'], birthdayProperties: { type, contact: 'people/c1', ...extra } });
+for (const [i, e] of [bday('Zed Zane', '1991-02-03'), bday('Bo Bright', '1970-07-09'), bday('Ann Able', '1988-11-18'), bday('Zed Zane', '2015-06-01', 'anniversary'), bday('Stranger Person', '1995-04-04')].entries()) g.calendars.get('primary').events.set(`bd${i}`, { id: `bd${i}`, status: 'confirmed', ...e });
 
 async function device(label, { width = 390 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 844 }, isMobile: width < 700, hasTouch: width < 700, serviceWorkers: 'block', timezoneId: 'Asia/Riyadh' });
@@ -76,6 +79,18 @@ await A.p.click('#view-outings .item.clickable:has(.chip.sel) >> nth=0'); await 
 await A.p.click('.sheet button:has-text("Cancel plan")'); await sleep(900);
 check(!Object.values((await state(A.p)).outings).some(o => o.planned), 'the plan is gone');
 check(![...g.calendars.get('primary').events.values()].some(e => e.status !== 'cancelled' && e.extendedProperties?.private?.clementine === 'outing'), 'and its calendar event with it');
+await sync(A.p);
+console.log('birthdays from Google');
+await A.p.click('nav.tabs button[data-view=people]'); await sleep(200); await A.p.click('#view-people .seg button:has-text("Birthdays")'); await sleep(200);
+await A.p.click('#view-people button:has-text("Get birthdays from Google")');
+check(await until(A.p, () => !!document.querySelector('.sheet .gb-list')), 'Google’s birthdays are read and matched');
+const gbTxt = await A.p.locator('.sheet').innerText();
+check(/Zed Zane → Zed/.test(gbTxt) && /Bo Bright → Bo Bright \(colleague\)/.test(gbTxt) && /already saved/.test(gbTxt) && /1 not in Clementine/.test(gbTxt), 'matched to a friend, a colleague’s card, and Annie’s is already saved');
+await A.p.click('.sheet .gb-loose summary'); await A.p.click('.sheet .gb-loose .chip'); await A.p.click('.sheet button:has-text("Save ticked")'); await sleep(600);
+const sg = await state(A.p);
+check(sg.friends.f2.birthday === '1991-02-03' && sg.friends.f2.dates.some(d => d.label === 'Anniversary' && d.date === '2015-06-01'), 'a friend’s birthday (with the year) and anniversary are saved');
+check(sg.contacts['id:3'].birthday === '07-09' && sg.contacts['id:3'].phone === '0566000333', 'a colleague’s card gets the birthday (a 1970 year is dropped) and keeps its numbers');
+check(Object.values(sg.friends).some(f => f.name === 'Stranger Person' && f.birthday === '1995-04-04'), 'someone not in Clementine can be added as a friend');
 await sync(A.p);
 console.log('a second device');
 const B = await device('desktop', { width: 1400 });
