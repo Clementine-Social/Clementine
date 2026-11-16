@@ -3,7 +3,7 @@
 // The rules mirror store.js sanitize() and go one level deeper, so whatever survives here also survives a reload.
 
 // collections that are maps id → record
-const MAPS = ['friends', 'contacts', 'groups', 'outings', 'polls', 'wishlist', 'treats', 'deleted', 'stamps'];
+const MAPS = ['friends', 'contacts', 'groups', 'outings', 'polls', 'wishlist', 'treats', 'touches', 'deleted', 'stamps'];
 const OWN = new Set([...MAPS, 'app', 'version', 'updatedAt', 'settings', 'migrated', 'outbox', 'google']);
 const SCALAR_MAPS = new Set(['deleted', 'stamps']);
 const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -30,7 +30,7 @@ export function checkBackup(json) {
   if (foreign.length) dropped.push(`not Clementine's: ${foreign.slice(0, 6).join(', ')}${foreign.length > 6 ? '…' : ''}`);
   for (const k of ['settings', 'google']) if (k in s && !isObj(s[k])) { delete s[k]; dropped.push(`${k} (unreadable)`); }
   const n = (k) => isObj(s[k]) ? Object.keys(s[k]).length : 0;
-  const counts = { friends: n('friends'), 'contact cards': n('contacts'), groups: n('groups'), outings: n('outings'), polls: n('polls'), 'wishlist items': n('wishlist'), treats: n('treats') };
+  const counts = { friends: n('friends'), 'contact cards': n('contacts'), groups: n('groups'), outings: n('outings'), polls: n('polls'), 'wishlist items': n('wishlist'), treats: n('treats'), touches: n('touches') };
   return { ok: true, error: '', state: s, dropped, summary: { savedAt: +s.updatedAt || 0, counts } };
 }
 

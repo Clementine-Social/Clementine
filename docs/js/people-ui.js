@@ -5,6 +5,7 @@ import { h, toast, keyOf, fromKey, addDays, startOfDay, relDay, DAY_SHORT, MONTH
 import * as F from './social.js';
 import * as R from './roster.js';
 import * as SU from './social-ui.js';
+import * as PE from './person-ui.js';
 
 let ctx = null, seg = 'friends', query = '', unit = 'all', showN = 60;
 export function initPeople(c) { ctx = c; }
@@ -19,7 +20,7 @@ const has = (v, q) => String(v || '').toLowerCase().includes(q);
 /** The card for a rota key (a colleague) or a friend id. Friends open their own editor. */
 export function personSheet(key) {
   const s = S(), fr = s.friends?.[key] || F.friendList(s).find(f => f.rotaKey === key);
-  if (fr) return SU.friendSheet(fr);
+  if (fr) return PE.profileSheet(fr);
   const p = R.person(key) || { key, name: s.contacts?.[key]?.name || key.replace(/^(id|name):/, ''), unit: '' }, c = F.contactOf(s, key), now = startOfDay(new Date());
   const week = Array.from({ length: 7 }, (_, i) => addDays(now, i)).map(d => ({ d, sh: R.shiftOf(key, d) }));
   const box = ctx.sheet([h('h2', {}, R.bare(p.name)), h('div', { class: 'small muted' }, [R.UNIT_LABEL[p.unit] || 'Not in the current roster', c.nick ? `you call them ${c.nick}` : ''].filter(Boolean).join(' · ')),
@@ -80,8 +81,8 @@ function birthdaysSeg() {
   const byMonth = new Map(); for (const b of list) { const k = `${b.date.getFullYear()}-${b.date.getMonth()}`; if (!byMonth.has(k)) byMonth.set(k, []); byMonth.get(k).push(b); }
   const when = (b) => `${DAY_SHORT[b.date.getDay()]} ${b.date.getDate()} ${MONTHS[b.date.getMonth()].slice(0, 3)} · ${b.inDays === 0 ? 'today' : b.inDays === 1 ? 'tomorrow' : `in ${days(b.inDays)}`}${b.friend ? '' : ' · colleague'}`;
   const plan = (b) => b.friend && b.inDays <= 21 ? h('button', { class: 'btn sm', onClick: (e) => { e.stopPropagation(); SU.inviteSheet([b.friend.id], null, `Surprise for ${b.name}’s birthday`); } }, 'Plan') : null;
-  const row = (b) => h('div', { class: 'row nudge clickable', onClick: () => b.friend ? SU.friendSheet(b.friend) : personSheet(b.key) }, h('span', { class: 'ch-ic sm' }, b.inDays <= 7 ? '🎂' : '🎈'),
-    h('div', { class: 'grow' }, h('div', { class: 'name' }, b.name, b.age ? h('span', { class: 'dim' }, ` · ${b.age}`) : null), h('div', { class: 'tiny dim' }, when(b))), plan(b));
+  const row = (b) => h('div', { class: 'row nudge clickable', onClick: () => b.friend ? PE.profileSheet(b.friend) : personSheet(b.key) }, b.friend ? PE.ring(b.friend, { size: 36 }) : h('span', { class: 'ch-ic sm' }, b.birthday ? '🎂' : '📅'),
+    h('div', { class: 'grow' }, h('div', { class: 'name' }, b.birthday ? b.name : `${b.name}: ${b.label}`, b.age ? h('span', { class: 'dim' }, b.birthday ? ` turns ${b.age}` : ` (${b.age} years)`) : null), h('div', { class: 'tiny dim' }, when(b))), plan(b));
   const months = [...byMonth.values()].map(l => h('div', { class: 'card' }, h('div', { class: 'title' }, `${MONTHS[l[0].date.getMonth()]} ${l[0].date.getFullYear()}`), l.map(row)));
   return [list.length ? months : h('div', { class: 'card small muted' }, 'No birthdays saved yet. Add them on friends’ and colleagues’ cards (14/03, or 14/03/1990 to see their age).'),
     missing.length ? h('details', { class: 'card' }, h('summary', { class: 'small' }, `No birthday saved for ${missing.length} friend${missing.length > 1 ? 's' : ''}`), h('div', { class: 'chips', style: { marginTop: '8px' } }, missing.map(f => h('button', { class: 'chip', onClick: () => SU.friendSheet(f) }, F.shortName(f))))) : null];

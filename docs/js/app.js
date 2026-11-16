@@ -12,10 +12,11 @@ import * as MIG from './migrate.js';
 import * as SU from './social-ui.js';
 import * as PU from './people-ui.js';
 import * as XU from './plans-ui.js';
+import * as PE from './person-ui.js';
 import { checkBackup, describeCounts } from './backup-check.js';
 import { h, toast, keyOf, fromKey, addDays, startOfDay, fmtDate, pad2, DAY_NAMES, MONTHS, uid } from './util.js';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 const CITRUS_URL = 'https://amaerys.github.io/citrus-maxima/';
 const MANDARIN_URL = 'https://mandarin-work.github.io/Mandarin/';
 
@@ -54,12 +55,14 @@ async function boot() {
     else if (e.key === 'f') { SU.findSheet(); e.preventDefault(); }
     else if (e.key === 'i') { SU.inviteSheet([]); e.preventDefault(); }
     else if (e.key === 'l') { SU.outingSheet(null); e.preventDefault(); }
+    else if (e.key === 'c') { PE.touchSheet(); e.preventDefault(); }
+    else if (e.key === 'a') { PE.availabilitySheet(); e.preventDefault(); }
     else if (e.key === '?') { shortcutsSheet(); e.preventDefault(); }
   });
   window.addEventListener('online', () => { rt.online = true; renderSync(); flushOutbox().then(render).catch(() => {}); });
   window.addEventListener('offline', () => { rt.online = false; renderSync(); });
-  const sub = { S, update: (fn) => store.update(fn), revert: store.revert, sheet: (c) => sheet(c), render: () => render(), go: (v, p) => go(v, p), busyOf, addEvent, signedIn: () => G.isSignedIn() || G.wasSignedIn(), personSheet: (k) => PU.personSheet(k), freePart: SU.freePart };
-  SU.initSocial(sub); PU.initPeople(sub); XU.initPlans(sub);
+  const sub = { S, update: (fn) => store.update(fn), revert: store.revert, sheet: (c) => sheet(c), render: () => render(), go: (v, p) => go(v, p), busyOf, addEvent, removeEvent, signedIn: () => G.isSignedIn() || G.wasSignedIn(), personSheet: (k) => PU.personSheet(k), freePart: SU.freePart };
+  SU.initSocial(sub); PU.initPeople(sub); XU.initPlans(sub); PE.initPerson(sub);
   store.subscribe(() => { applyTiming(); render(); publishSoon(); });
   store.onRemoteSync(scheduleRemoteSave);
   loadCachedEvents(); R.load(); loadHubCache();
@@ -92,7 +95,7 @@ async function boot() {
 function applyTiming() { F.setTiming(CZ.custom(S()).social); }
 
 // Arriving from another app or a link: ?from=citrus shows "← Citrus"; ?do=<action> (or #view) jumps straight there.
-const DO = { today: ['today'], free: ['free'], find: ['free', 'find'], invite: ['today', 'invite'], log: ['outings', 'log'], outings: ['outings'], birthdays: ['people', 'birthdays'], people: ['people'], colleagues: ['people', 'colleagues'], groups: ['people', 'groups'], plans: ['plans'], poll: ['plans', 'poll'], polls: ['plans'], add: ['people', 'add'] };
+const DO = { call: ['today', 'call'], share: ['today', 'share'], today: ['today'], free: ['free'], find: ['free', 'find'], invite: ['today', 'invite'], log: ['outings', 'log'], outings: ['outings'], birthdays: ['people', 'birthdays'], people: ['people'], colleagues: ['people', 'colleagues'], groups: ['people', 'groups'], plans: ['plans'], poll: ['plans', 'poll'], polls: ['plans'], add: ['people', 'add'] };
 function handleIncoming() {
   try {
     const q = new URLSearchParams(location.search);
@@ -110,6 +113,8 @@ function handleIncoming() {
     else if (target[1] === 'log') later(() => SU.outingSheet(null));
     else if (target[1] === 'poll') later(() => XU.newPoll());
     else if (target[1] === 'add') later(() => SU.friendSheet(null));
+    else if (target[1] === 'call') later(() => PE.touchSheet());
+    else if (target[1] === 'share') later(() => PE.availabilitySheet());
   } catch (e) { console.warn('incoming', e); }
 }
 
@@ -163,7 +168,7 @@ function render() {
   if (!el.querySelector('h1')) el.prepend(h('h1', { class: 'sr-only' }, VIEW_NAMES[rt.view] || 'Clementine'));
   if (focus) { const i = el.querySelector('.dir-search'); if (i) { i.focus({ preventScroll: true }); i.setSelectionRange(i.value.length, i.value.length); } }
   if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
-  const pt = document.getElementById('pageTitle'), d = new Date(); if (pt) pt.textContent = `${DAY_NAMES[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  const pt = document.getElementById('pageTitle'), d = new Date(); if (pt) pt.textContent = rt.view === 'today' ? '' : `${DAY_NAMES[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;   // Today says the date in its own heading
 }
 function crashCard(e) {
   return h('div', { class: 'card warn' }, h('div', { class: 'title' }, 'This screen hit a problem'), h('div', { class: 'small' }, 'Your data is safe. Try another tab, sync, or download a backup and tell Claude what you tapped.'),
@@ -373,14 +378,20 @@ async function loadEvents(from, to) {
 }
 function cacheEvents() { try { localStorage.setItem('clementine.events', JSON.stringify(rt.events, (k, v) => v instanceof Date ? v.toISOString() : v)); } catch {} }
 function loadCachedEvents() { try { const raw = JSON.parse(localStorage.getItem('clementine.events') || '{}'); for (const [k, list] of Object.entries(raw)) rt.events[k] = list.map(e => ({ ...e, start: new Date(e.start), end: new Date(e.end) })); } catch {} }
-/** Put a planned meet-up on your calendar. → 'cal' (added), 'queued' (offline: added when back), 'none' (not signed in). */
-async function addEvent({ title, date, start, minutes = 120 }) {
-  if (!G.isSignedIn() && !G.wasSignedIn()) return 'none';
+/** Put a planned meet-up on your calendar. → {status: 'cal' (added) | 'queued' (offline: added when back) | 'none' (not signed in), id}. */
+async function addEvent({ title, date, start, minutes = 120, key = '' }) {
+  if (!G.isSignedIn() && !G.wasSignedIn()) return { status: 'none', id: '' };
   const d = fromKey(date), s = new Date(+d + start * 60000), e = new Date(+s + minutes * 60000), cal = S().settings.outingCalendarId || 'primary';
-  const payload = { title, start: s, end: e, description: 'Planned in Clementine.', tag: 'outing', reminders: [60] };
-  if (!rt.online || !G.isSignedIn()) { queueOutbox({ type: 'create', calendarId: cal, payload }); return 'queued'; }
-  try { await G.createEvent(cal, payload); syncCalendar(true).catch(() => {}); return 'cal'; }
-  catch (err) { if (err.network || /expired|not signed/i.test(err.message)) { queueOutbox({ type: 'create', calendarId: cal, payload }); return 'queued'; } throw err; }
+  const payload = { title, start: s, end: e, description: 'Planned in Clementine.', tag: 'outing', reminders: [60], ...(key ? { key } : {}) };
+  if (!rt.online || !G.isSignedIn()) { queueOutbox({ type: 'create', calendarId: cal, payload, outing: key }); return { status: 'queued', id: '' }; }
+  try { const ev = await G.createEvent(cal, payload); syncCalendar(true).catch(() => {}); return { status: 'cal', id: ev?.id ? `${cal}|${ev.id}` : '' }; }
+  catch (err) { if (err.network || /expired|not signed/i.test(err.message)) { queueOutbox({ type: 'create', calendarId: cal, payload, outing: key }); return { status: 'queued', id: '' }; } throw err; }
+}
+/** Take a cancelled plan's event off the calendar (queued when offline). The id is "calendar|event". */
+function removeEvent(ref) {
+  const [cal, id] = String(ref || '').includes('|') ? String(ref).split('|') : [S().settings.outingCalendarId || 'primary', ref]; if (!id) return;
+  if (!rt.online || !G.isSignedIn()) { queueOutbox({ type: 'delete', calendarId: cal, eventId: id }); return; }
+  G.deleteEvent(cal, id).then(() => syncCalendar(true)).catch(() => queueOutbox({ type: 'delete', calendarId: cal, eventId: id }));
 }
 function queueOutbox(op) { store.update(s => ({ ...s, outbox: [...(s.outbox || []), { ...op, id: uid(), at: Date.now() }] }), { silent: true, remote: false }); }
 let flushing = null;
@@ -395,7 +406,9 @@ async function flushOutboxOnce() {
         const payload = { ...op.payload, start: new Date(op.payload.start), end: new Date(op.payload.end), key: op.id };
         let ev = op.tried ? await G.findEventByKey(op.calendarId, op.id, addDays(payload.start, -1), addDays(payload.end, 1)).catch(() => null) : null;
         if (!ev) { store.update(s => ({ ...s, outbox: (s.outbox || []).map(o => o.id === op.id ? { ...o, tried: true } : o) }), { silent: true, remote: false }); ev = await G.createEvent(op.calendarId, payload); }
-      }
+        // the plan it belongs to remembers the event, so cancelling the plan later removes it
+        if (op.outing && ev?.id) store.update(s => s.outings?.[op.outing] ? { ...s, outings: { ...s.outings, [op.outing]: { ...s.outings[op.outing], eventId: `${op.calendarId}|${ev.id}`, at: Date.now() } } } : s, { silent: true });
+      } else if (op.type === 'delete') await G.deleteEvent(op.calendarId, op.eventId);
       done.add(op.id);
     } catch (e) { if (e.status && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429) done.add(op.id); }   // rejected for good: don't retry forever
   }
@@ -415,7 +428,7 @@ function sheet(content) {
   box.addEventListener('input', (e) => { if (e.target.matches?.('textarea, input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=search]):not([type=file]):not([data-nodirty])')) bg.dataset.dirty = '1'; });
   bg.append(box); document.body.append(bg); sheetOpeners.set(bg, opener);
   const close = () => bg.remove();
-  queueMicrotask(() => { if (!bg.isConnected || box.contains(document.activeElement)) return; const f = box.querySelector('input:not([type=hidden]):not([type=file]):not([type=checkbox]), textarea, select'); (f && !matchMedia('(hover: none)').matches ? f : box).focus({ preventScroll: true }); });
+  queueMicrotask(() => { if (!bg.isConnected || box.contains(document.activeElement)) return; const f = box.querySelector('input:not([type=hidden]):not([type=file]):not([type=checkbox]):not([data-nofocus]), textarea:not([data-nofocus]), select:not([data-nofocus])'); (f && !matchMedia('(hover: none)').matches ? f : box).focus({ preventScroll: true }); });
   return { close, box };
 }
 /** Escape: close the top sheet; with unsaved typing, the first Escape only warns. */
@@ -425,7 +438,7 @@ function closeTopSheet() {
   bg.remove(); return true;
 }
 function shortcutsSheet() {
-  const rows = [['1 – 5', 'Today, Free, People, Outings, Plans (in your tab order)'], [',', 'Settings'], ['/', 'Search people'], ['f', 'Find a day'], ['i', 'Plan a meet-up'], ['l', 'Log an outing'], ['r', 'Sync with Google now'], ['Esc', 'close the top sheet or the search'], ['?', 'this list']];
+  const rows = [['1 – 5', 'Today, Free, People, Outings, Plans (in your tab order)'], [',', 'Settings'], ['/', 'Search people'], ['f', 'Find a day'], ['i', 'Plan a meet-up'], ['l', 'Log an outing'], ['c', 'Log a call or message'], ['a', 'Share my free time'], ['r', 'Sync with Google now'], ['Esc', 'close the top sheet or the search'], ['?', 'this list']];
   sheet([h('h2', {}, 'Keyboard shortcuts'), h('div', { class: 'kv keys' }, rows.flatMap(([k, v]) => [h('kbd', {}, k), h('span', {}, v)]))]);
 }
 // Back button closes the top sheet: one history entry guards all open sheets.

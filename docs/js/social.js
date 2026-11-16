@@ -57,22 +57,35 @@ export const SHIFT_CODES = [{ id: 'D', label: 'Day' }, { id: 'E', label: 'Evenin
 const DEFAULT_HOURS = { D: [7 * 60, 19 * 60], E: [13 * 60, 22 * 60], N: [19 * 60, 7 * 60] };
 const NURSE_HOURS = { D: [8 * 60, 20 * 60], E: [12 * 60, 24 * 60], N: [20 * 60, 8 * 60] };
 const cleanHours = (o) => { const out = {}; for (const c of ['D', 'E', 'N']) { const v = o?.[c]; if (Array.isArray(v) && v.length === 2 && v.every(n => Number.isFinite(+n) && +n >= 0 && +n <= 1440) && +v[0] !== +v[1]) out[c] = [+v[0], +v[1]]; } return out; };
-const cleanSched = (o) => { const out = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (/^\d{4}-\d\d-\d\d$/.test(k) && ['D', 'E', 'N', 'off', 'leave'].includes(v)) out[k] = v; return out; };
+// hand-entered days older than ~2 months are dropped: they can never matter again and would only grow the file
+const cleanSched = (o, now = new Date()) => { const out = {}, cut = keyOf(addDays(startOfDay(now), -60)); if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (/^\d{4}-\d\d-\d\d$/.test(k) && k >= cut && ['D', 'E', 'N', 'off', 'leave'].includes(v)) out[k] = v; return out; };
+/** Other dates worth remembering for a person (anniversary, their child's birthday, a graduation): [{label, date}] with MM-DD or YYYY-MM-DD. */
+const cleanDates = (l) => (Array.isArray(l) ? l : []).map(d => ({ label: String(d?.label || '').trim().slice(0, 30), date: parseBirthday(d?.date) })).filter(d => d.label && d.date).slice(0, 8);
+/** Gift ideas: [{id, text, done}] — done is the date it was given ('' while it is still an idea). */
+const cleanGifts = (l) => (Array.isArray(l) ? l : []).map(g => ({ id: String(g?.id || 'g' + Math.random().toString(36).slice(2, 8)).slice(0, 20), text: String(g?.text || '').trim().slice(0, 80), done: /^\d{4}-\d\d-\d\d$/.test(g?.done || '') ? g.done : '' })).filter(g => g.text).slice(0, 30);
 export function addFriend(s, f) {
   const name = String(f.name || '').trim().slice(0, 60); if (!name) return s; const id = f.id || uid();
   const fr = { id, name, nick: String(f.nick || '').slice(0, 30), kind: KIND_IDS.includes(f.kind) ? f.kind : 'other', phone: asciiDigits(f.phone || '').slice(0, 24), whatsapp: asciiDigits(f.whatsapp || '').slice(0, 24), snap: cleanHandle(f.snap), insta: cleanHandle(f.insta),
     rotaKey: /^(id|name):/.test(f.rotaKey || '') ? f.rotaKey : '', place: String(f.place || '').slice(0, 60), birthday: parseBirthday(f.birthday), every: Math.max(0, Math.min(365, +f.every || 0)), notes: String(f.notes || '').slice(0, 500),
-    sched: cleanSched(f.sched), weeklyOff: Array.isArray(f.weeklyOff) ? [...new Set(f.weeklyOff.map(Number).filter(n => n >= 0 && n <= 6))] : [], hours: cleanHours(f.hours), fav: !!f.fav, createdAt: f.createdAt || Date.now(), at: Date.now() };
+    sched: cleanSched(f.sched), dates: cleanDates(f.dates), gifts: cleanGifts(f.gifts), weeklyOff: Array.isArray(f.weeklyOff) ? [...new Set(f.weeklyOff.map(Number).filter(n => n >= 0 && n <= 6))] : [], hours: cleanHours(f.hours), fav: !!f.fav, createdAt: f.createdAt || Date.now(), at: Date.now() };
   const s2 = { ...s, friends: { ...(s.friends || {}), [id]: fr } };
   // a colleague who becomes a friend: their friend record is now their card, so the separate card goes (with a tombstone)
   if (fr.rotaKey && s2.contacts?.[fr.rotaKey]) { const contacts = { ...s2.contacts }; delete contacts[fr.rotaKey]; return { ...s2, contacts, deleted: { ...(s2.deleted || {}), [`contact:${fr.rotaKey}`]: Date.now() } }; }
   return s2;
 }
 export function updateFriend(s, id, patch) { const cur = s.friends?.[id]; if (!cur) return s; return addFriend(s, { ...cur, ...patch, id, createdAt: cur.createdAt }); }
-/** Remove a friend. A colleague (linked to a rota row) keeps their numbers as a contact card unless `drop`. */
+/** Remove a friend. A colleague (linked to a rota row) keeps their numbers as a contact card unless `drop`.
+ *  Their id leaves groups, open polls and the wishlist (so a poll is never stuck "waiting" on someone gone); past outings
+ *  and touches keep their name, so the history still reads right. */
 export function deleteFriend(s, id, { drop = false } = {}) {
-  const f = s.friends?.[id]; if (!f) return s; const friends = { ...(s.friends || {}) }; delete friends[id];
-  let out = { ...s, friends, deleted: { ...(s.deleted || {}), [`friend:${id}`]: Date.now() } };
+  const f = s.friends?.[id]; if (!f) return s; const friends = { ...(s.friends || {}) }; delete friends[id]; const now = Date.now(), name = shortName(f);
+  let out = { ...s, friends, deleted: { ...(s.deleted || {}), [`friend:${id}`]: now } };
+  const touchRecs = (coll, fn) => { const m = { ...(out[coll] || {}) }; let changed = false; for (const [k, r] of Object.entries(m)) { const n = fn(r); if (n && n !== r) { m[k] = { ...n, at: now }; changed = true; } } if (changed) out = { ...out, [coll]: m }; };
+  touchRecs('groups', (g) => g.members?.includes(id) ? { ...g, members: g.members.filter(m => m !== id) } : g);
+  touchRecs('polls', (p) => p.status === 'open' && p.who?.includes(id) ? { ...p, who: p.who.filter(w => w !== id), votes: Object.fromEntries(Object.entries(p.votes || {}).filter(([k]) => k !== id)) } : p);
+  touchRecs('wishlist', (w) => w.with?.includes(id) ? { ...w, with: w.with.filter(x => x !== id) } : w);
+  touchRecs('outings', (o) => o.who?.includes(id) ? { ...o, gone: { ...(o.gone || {}), [id]: name } } : o);
+  touchRecs('touches', (t) => t.who?.includes(id) ? { ...t, gone: { ...(t.gone || {}), [id]: name } } : t);
   if (!drop && f.rotaKey && (f.phone || f.whatsapp || f.snap || f.insta || f.birthday)) out = setContact(out, f.rotaKey, { phone: f.phone, whatsapp: f.whatsapp, snap: f.snap, insta: f.insta, birthday: f.birthday, note: '' });
   return out;
 }
@@ -195,7 +208,56 @@ export function logOuting(s, o, now = new Date()) {
   const id = o.id || 'o' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4), when = /^\d{4}-\d\d-\d\d$/.test(o.date) ? o.date : keyOf(now);
   const start = Number.isFinite(+o.start) && o.start !== '' && o.start != null ? Math.max(0, Math.min(1439, Math.round(+o.start))) : null;
   const out = { id, date: when, who: [...new Set((o.who || []).filter(Boolean))], what: String(o.what || '').slice(0, 80), where: String(o.where || '').slice(0, 80), rating: Math.max(0, Math.min(5, +o.rating || 0)), notes: String(o.notes || '').slice(0, 400), planned: !!o.planned || when > keyOf(now), ...(start != null ? { start } : {}), ...(o.eventId ? { eventId: String(o.eventId).slice(0, 200) } : {}), at: Date.now() };
+  const bring = cleanBring(o.bring), cost = cleanCost(o.cost);
+  if (bring.length) out.bring = bring; if (cost) out.cost = cost;
+  if (o.gone && typeof o.gone === 'object') out.gone = Object.fromEntries(Object.entries(o.gone).slice(0, 20).map(([k, v]) => [k, String(v).slice(0, 40)]));
+  if (o.fromPoll) out.fromPoll = String(o.fromPoll).slice(0, 40);
   return { ...s, outings: { ...(s.outings || {}), [id]: out } };
+}
+/** Who brings what to a gathering: [{id, item, who ('me' | friend id | ''), done}]. */
+export const cleanBring = (l) => (Array.isArray(l) ? l : []).map(b => ({ id: String(b?.id || 'b' + Math.random().toString(36).slice(2, 8)).slice(0, 20), item: String(b?.item || '').trim().slice(0, 60), who: typeof b?.who === 'string' ? b.who.slice(0, 40) : '', done: !!b?.done })).filter(b => b.item).slice(0, 40);
+/** The bill: {total, paidBy ('me' | friend id), split: ['me', ids…], settled: [ids who paid you back, or 'me' when you paid them]}. null when there is none. */
+export const cleanCost = (c) => { const total = Math.round((+c?.total || 0) * 100) / 100; if (!(total > 0) || total > 1e6) return null; const split = [...new Set((Array.isArray(c.split) ? c.split : []).filter(x => typeof x === 'string' && x))].slice(0, 30); const paidBy = typeof c.paidBy === 'string' && c.paidBy ? c.paidBy : 'me'; return { total, paidBy, split: split.length ? split : ['me'], settled: [...new Set((Array.isArray(c.settled) ? c.settled : []).filter(x => typeof x === 'string'))].slice(0, 30) }; };
+/** Mark a share as paid back (or not). */
+export function settle(s, outingId, who, paid = true) { const o = s.outings?.[outingId]; if (!o?.cost) return s; const set = new Set(o.cost.settled); paid ? set.add(who) : set.delete(who); return { ...s, outings: { ...s.outings, [outingId]: { ...o, cost: { ...o.cost, settled: [...set] }, at: Date.now() } } }; }
+/** Money between you and each friend from shared bills: {id: amount}; positive = they owe you, negative = you owe them. Bills between two friends are theirs. */
+export function balances(s) {
+  const bal = {};
+  for (const o of rec(s.outings)) {
+    const c = o.cost; if (!c || !c.split.length) continue; const share = c.total / c.split.length;
+    if (c.paidBy === 'me') { for (const p of c.split) if (p !== 'me' && !c.settled.includes(p)) bal[p] = (bal[p] || 0) + share; }
+    else if (c.split.includes('me') && !c.settled.includes('me')) bal[c.paidBy] = (bal[c.paidBy] || 0) - share;
+  }
+  for (const k of Object.keys(bal)) { bal[k] = Math.round(bal[k] * 100) / 100; if (Math.abs(bal[k]) < 0.01) delete bal[k]; }
+  return bal;
+}
+/** Open shares per friend, for the settle-up sheet: [{outing, amount, mine (you owe)}]. */
+export function openShares(s, id) {
+  const out = [];
+  for (const o of outingList(s)) { const c = o.cost; if (!c) continue; const share = Math.round(c.total / c.split.length * 100) / 100;
+    if (c.paidBy === 'me' && c.split.includes(id) && !c.settled.includes(id)) out.push({ outing: o, amount: share, mine: false });
+    else if (c.paidBy === id && c.split.includes('me') && !c.settled.includes('me')) out.push({ outing: o, amount: share, mine: true }); }
+  return out;
+}
+/** A friend's name on a record, even after they were removed (`gone` keeps it). */
+export const nameOn = (s, rec, id) => { const f = s.friends?.[id]; return f ? shortName(f) : rec?.gone?.[id] || 'someone'; };
+
+// ───────────── touches: a call, a message, a visit — keeping in touch without meeting up
+export const TOUCH_KINDS = [['call', '📞', 'Call'], ['message', '💬', 'Message'], ['visit', '🏠', 'Visit'], ['gift', '🎁', 'Gift'], ['other', '✨', 'Other']];
+export function logTouch(s, t, now = new Date()) {
+  const id = t.id || 't' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4), who = [...new Set((t.who || []).filter(Boolean))].slice(0, 20); if (!who.length) return s;
+  const kind = TOUCH_KINDS.some(k => k[0] === t.kind) ? t.kind : 'other', date = /^\d{4}-\d\d-\d\d$/.test(t.date) && t.date <= keyOf(now) ? t.date : keyOf(now);
+  return { ...s, touches: { ...(s.touches || {}), [id]: { id, who, kind, date, note: String(t.note || '').slice(0, 200), ...(t.gone ? { gone: t.gone } : {}), at: Date.now() } } };
+}
+export function deleteTouch(s, id) { const touches = { ...(s.touches || {}) }; delete touches[id]; return { ...s, touches, deleted: { ...(s.deleted || {}), [`touch:${id}`]: Date.now() } }; }
+export const touchList = (s) => rec(s.touches).sort((a, b) => b.date.localeCompare(a.date) || b.at - a.at);
+export function lastTouch(s, id) { const t = touchList(s).find(x => x.who.includes(id)); return t ? t.date : ''; }
+/** The last time you were in touch at all: met up, or a call / message / visit. */
+export function lastContact(s, id, now = new Date()) { const a = lastSeen(s, id, now), b = lastTouch(s, id); return a > b ? a : b; }
+/** Everything you did with someone, newest first: outings and touches together. */
+export function timeline(s, id, now = new Date(), n = 30) {
+  const t = keyOf(now), o = outingList(s).filter(x => x.who.includes(id) && (!x.planned || x.date >= t)).map(x => ({ kind: x.planned ? 'plan' : 'outing', date: x.date, rec: x })), k = touchList(s).filter(x => x.who.includes(id)).map(x => ({ kind: 'touch', date: x.date, rec: x }));
+  return [...o, ...k].sort((a, b) => b.date.localeCompare(a.date)).slice(0, n);
 }
 /** A planned outing whose time has passed: ask whether it happened. Without a start time, ask from the next day. */
 export const outingDue = (o, now = new Date()) => { if (!o.planned) return false; const t = keyOf(now); if (o.date < t) return true; if (o.date > t || o.start == null) return false; return now.getHours() * 60 + now.getMinutes() >= o.start + 120; };
@@ -204,22 +266,39 @@ export const outingList = (s) => rec(s.outings).sort((a, b) => b.date.localeComp
 export function lastSeen(s, id, now = new Date()) { const t = keyOf(now); const l = outingList(s).filter(o => !o.planned && o.date <= t && o.who.includes(id))[0]; return l ? l.date : ''; }
 /** Days past the gap you said you want (0 if you set none or are on time). */
 export function overdue(s, f, now = new Date()) {
-  if (!f.every) return 0; const ls = lastSeen(s, f.id, now), since = ls ? Math.round((startOfDay(now) - fromKey(ls)) / 864e5) : Math.round((startOfDay(now) - startOfDay(new Date(f.createdAt || now))) / 864e5);
+  if (!f.every) return 0; const ls = lastContact(s, f.id, now), since = ls ? Math.round((startOfDay(now) - fromKey(ls)) / 864e5) : Math.round((startOfDay(now) - startOfDay(new Date(f.createdAt || now))) / 864e5);
   return Math.max(0, since - f.every);
 }
 export function friendStats(s, f, now = new Date()) {
   const y = String(now.getFullYear()), t = keyOf(now), all = outingList(s).filter(o => !o.planned && o.date <= t && o.who.includes(f.id)), yr = all.filter(o => o.date.startsWith(y)), rated = all.filter(o => o.rating);
-  return { total: all.length, thisYear: yr.length, last: lastSeen(s, f.id, now), avgRating: rated.length ? rated.reduce((t, o) => t + o.rating, 0) / rated.length : null, favPlace: (() => { const c = {}; all.forEach(o => { if (o.where) c[o.where] = (c[o.where] || 0) + 1; }); return Object.entries(c).sort((a, b) => b[1] - a[1])[0]?.[0] || ''; })() };
+  return { total: all.length, thisYear: yr.length, last: lastSeen(s, f.id, now), lastContact: lastContact(s, f.id, now), touches: touchList(s).filter(x => x.who.includes(f.id)).length, avgRating: rated.length ? rated.reduce((t, o) => t + o.rating, 0) / rated.length : null, favPlace: (() => { const c = {}; all.forEach(o => { if (o.where) c[o.where] = (c[o.where] || 0) + 1; }); return Object.entries(c).sort((a, b) => b[1] - a[1])[0]?.[0] || ''; })() };
 }
-const nextBirthday = (b, t) => { const [m, d] = String(b).split('-').slice(-2).map(Number); if (!m || !d) return null; const mk = (y) => (m === 2 && d === 29 && new Date(y, 1, 29).getMonth() !== 1) ? new Date(y, 1, 28) : new Date(y, m - 1, d); let n = mk(t.getFullYear()); if (n < t) n = mk(t.getFullYear() + 1); return n; };
-/** Birthdays in the next `days`, soonest first: friends and colleagues' contact cards. → [{friend|null, key, name, date, inDays, age}] */
-export function birthdays(s, now = new Date(), days = 45) {
+export const nextBirthday = (b, t) => { const [m, d] = String(b).split('-').slice(-2).map(Number); if (!m || !d) return null; const mk = (y) => (m === 2 && d === 29 && new Date(y, 1, 29).getMonth() !== 1) ? new Date(y, 1, 28) : new Date(y, m - 1, d); let n = mk(t.getFullYear()); if (n < t) n = mk(t.getFullYear() + 1); return n; };
+/** Birthdays and other dates in the next `days`, soonest first: friends (birthday + their own dates) and colleagues' cards.
+ *  → [{friend|null, key, name, label ('Birthday' or the date's own label), birthday (bool), date, inDays, age (years since, when the year is known)}] */
+export function birthdays(s, now = new Date(), days = 45, { others = true } = {}) {
   const t = startOfDay(now), out = [];
-  const add = (b, extra) => { if (!b) return; const n = nextBirthday(b, t); if (!n) return; const inDays = Math.round((n - t) / 864e5); if (inDays <= days) { const y = /^\d{4}-/.test(b) ? +b.slice(0, 4) : 0; out.push({ ...extra, date: n, inDays, age: y ? n.getFullYear() - y : 0 }); } };
-  for (const f of friendList(s)) add(f.birthday, { friend: f, key: f.rotaKey || f.id, name: shortName(f) });
+  const add = (b, extra) => { if (!b) return; const n = nextBirthday(b, t); if (!n) return; const inDays = Math.round((n - t) / 864e5); if (inDays <= days) { const y = /^\d{4}-/.test(b) ? +b.slice(0, 4) : 0; out.push({ ...extra, date: n, inDays, age: y && n.getFullYear() > y ? n.getFullYear() - y : 0 }); } };
+  for (const f of friendList(s)) {
+    add(f.birthday, { friend: f, key: f.rotaKey || f.id, name: shortName(f), label: 'Birthday', birthday: true });
+    if (others) (f.dates || []).forEach((d, i) => add(d.date, { friend: f, key: `${f.rotaKey || f.id}#${i}`, name: shortName(f), label: d.label, birthday: false }));
+  }
   const fk = new Set(rec(s.friends).map(f => f.rotaKey).filter(Boolean));
-  for (const c of rec(s.contacts)) if (!fk.has(c.key)) add(c.birthday, { friend: null, key: c.key, name: R.bare(R.person(c.key)?.name || c.name || String(c.key).replace(/^(id|name):/, '')) });
+  for (const c of rec(s.contacts)) if (!fk.has(c.key)) add(c.birthday, { friend: null, key: c.key, name: R.bare(R.person(c.key)?.name || c.name || String(c.key).replace(/^(id|name):/, '')), label: 'Birthday', birthday: true });
   return out.sort((a, b) => a.inDays - b.inDays || a.name.localeCompare(b.name));
+}
+/** "Annie's birthday", "Annie: wedding anniversary". */
+export const occasionName = (b) => b.birthday ? `${b.name}'s birthday` : `${b.name}: ${b.label}`;
+
+/** Your free time in the next days as text to paste into a group chat ("I'm free: Thu 19 from 20:45, Sat 21 all day…"). */
+export function availabilityText(s, { days = 14, busyOf = () => [], now = new Date(), fmtDay = (d) => keyOf(d), minMin = 120 } = {}) {
+  const start = startOfDay(now), lines = [];
+  for (let i = 0; i < days; i++) {
+    const d = addDays(start, i), st = meState(s, d, busyOf(d)), w = clipToNow(st.windows, d, now).filter(x => x[1] - x[0] >= minMin); if (!w.length) continue;
+    const whole = !st.afterNight && st.status !== 'work' && w.some(x => x[1] - x[0] >= 8 * H);
+    lines.push(`${fmtDay(d)}: ${whole ? 'all day' : w.map(x => x[1] >= LATE ? `from ${hhmm(x[0])}` : `${hhmm(x[0])}–${hhmm(x[1])}`).join(', ')}`);
+  }
+  return lines.length ? `I'm free:\n${lines.join('\n')}` : '';
 }
 
 // ───────────────────────────── ideas for the time you have

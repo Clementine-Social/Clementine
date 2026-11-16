@@ -6,6 +6,9 @@ import * as X from './extras.js';
 import * as R from './roster.js';
 import * as CZ from './custom.js';
 import * as HUB from './hub.js';
+import * as PU from './person-ui.js';
+import * as CARD from './card.js';
+import { RECORD_MAPS } from './store.js';
 
 let ctx = null, showAllFriends = false, gridAll = false, histN = 40, freeSeg = 'grid';
 export function initSocial(c) { ctx = c; }
@@ -16,12 +19,14 @@ export const busyOf = (d) => { const k = keyOf(d); if (!busyMemo.has(k)) busyMem
 export const freshBusy = () => { busyMemo = new Map(); };
 export const field = (label, ...inputs) => h('div', { class: 'field' }, label ? h('label', {}, label) : null, ...inputs);
 const ini = (n) => String(n).replace(/^Dr\.?\s*/i, '').split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join('').toUpperCase();
-export const av = (f) => h('span', { class: `av sc-av ${f.kind || ''}` }, ini(f.name));
+export const av = (f, opts) => PU.ring(f, opts);
 export const dayLabel = (d) => `${DAY_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
 export const win = (w) => `${F.hhmm(w[0])}–${F.hhmm(w[1])}`;
 /** Relative day only when it adds something the date does not already say. */
 export const rel = (d) => { const n = Math.round((startOfDay(d) - startOfDay(new Date())) / 864e5); return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n > 1 && n < 14 ? `in ${n} days` : ''; };
-export const nameOf = (id) => { const f = S().friends?.[id]; return f ? F.shortName(f) : '?'; };
+export const nameOf = (id, rec = null) => F.nameOn(S(), rec, id);
+/** Undo for a change that touched several collections: every record that differs from `before` goes back (with tombstones where it did not exist). */
+export const undoTo = (x, before) => { let y = x; for (const [coll, pre] of Object.entries(RECORD_MAPS)) { const a = before[coll] || {}, b = y[coll] || {}; for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) if (a[k] !== b[k]) y = ctx.revert(y, coll, pre, k, a[k]); } return y; };
 const closeSheets = () => document.querySelectorAll('.sheet-bg').forEach(e => e.remove());
 const cc = () => S().settings?.cc || '966';
 /** One failing card must never blank the whole tab. */
@@ -85,6 +90,11 @@ export function friendSheet(f, preset = {}) {
   const name = inp('name', 'Name'), nick = inp('nick', 'What you call them'), phone = inp('phone', '05… or +966…', 'tel'), wa = inp('whatsapp', 'if different from phone', 'tel'), snap = inp('snap', 'username or link'), ig = inp('insta', '@username or link'), place = inp('place', 'Area / where they live (for picking spots)'), bd = inp('birthday', '14/03 or 14/03/1990');
   const kind = h('select', {}, F.FRIEND_KINDS.map(k => h('option', { value: k.id, selected: k.id === v.kind }, k.label))), every = h('input', { type: 'number', min: 0, max: 365, value: v.every ?? 21 }), notes = h('textarea', { rows: 2, placeholder: 'Food they like, allergies, what to avoid…' }, v.notes || '');
   const fav = h('input', { type: 'checkbox', checked: !!v.fav });
+  // other dates worth remembering: label + date rows, added and removed in place
+  const dates = (v.dates || []).map(d => ({ ...d })), datesBox = h('div', { class: 'fe-dates' });
+  const paintDates = () => datesBox.replaceChildren(...dates.map((d, i) => h('div', { class: 'fe-date' }, h('input', { value: d.label, placeholder: 'Anniversary, son’s birthday…', 'aria-label': 'What the date is', onInput: (e) => { d.label = e.target.value; } }), h('input', { value: F.fmtBirthday(d.date) || d.date || '', placeholder: '14/03', 'aria-label': 'Date', class: 'fe-dd', onInput: (e) => { d.date = e.target.value; } }), h('button', { type: 'button', class: 'btn sm ghost', 'aria-label': 'Remove this date', onClick: () => { dates.splice(i, 1); paintDates(); } }, '✕'))),
+    dates.length < 8 ? h('button', { type: 'button', class: 'btn sm ghost', onClick: () => { dates.push({ label: '', date: '' }); paintDates(); datesBox.querySelector('.fe-date:last-of-type input')?.focus(); } }, '＋ Another date') : null);
+  paintDates();
   const rotaBtn = h('button', { type: 'button', class: 'btn sc-rota', onClick: () => rotaPicker(rotaKey, (key) => { rotaKey = key; const p = R.person(key); if (p?.name && !name.value) name.value = R.bare(p.name); if (p && !f) kind.value = p.unit === 'nurse' ? 'nurse' : p.unit === 'gp' ? 'gp' : 'colleague'; paintRota(); paintHours(); }, name.value.split(' ')[0] || '') });
   const paintRota = () => { const n = rotaKey ? rotaName(rotaKey) : ''; rotaBtn.replaceChildren(h('span', { class: 'grow' }, rotaKey ? (n || 'Linked (not in the current roster)') : 'Not in a schedule — tap to link'), h('span', { class: 'dim' }, '›')); rotaBtn.classList.toggle('linked', !!rotaKey); };
   // shift hours for hand-entered days: defaults come from their roster (nurses D 08–20); change only if theirs differ
@@ -105,14 +115,15 @@ export function friendSheet(f, preset = {}) {
     if (!name.value.trim()) return toast('Give them a name', 'err');
     const b = bd.value.trim(), bp = F.parseBirthday(b); if (b && !bp) return toast('Birthday not understood — try 14/03 or 14/03/1990', 'err');
     const hours = {}; for (const c of ['D', 'E', 'N']) { const [a, z] = (hrsIn[c] || []).map(tVal), def = F.shiftHours(S(), { ...v, rotaKey, kind: kind.value, hours: {} }, c) || []; if (a != null && z != null && a !== z && (a !== def[0] || (z || 1440) % 1440 !== (def[1] || 0) % 1440)) hours[c] = [a, z === 0 ? 1440 : z]; }
-    const data = { name: name.value, nick: nick.value, kind: kind.value, phone: phone.value, whatsapp: wa.value, snap: snap.value, insta: ig.value, place: place.value, birthday: bp, every: +every.value || 0, notes: notes.value, rotaKey, sched, weeklyOff: [...weekly], hours, fav: fav.checked };
+    const badDate = dates.find(d => d.label.trim() && d.date && !F.parseBirthday(d.date)); if (badDate) return toast(`“${badDate.label}”: date not understood — try 14/03 or 14/03/2015`, 'err');
+    const data = { dates: dates.filter(d => d.label.trim() && d.date).map(d => ({ label: d.label, date: F.parseBirthday(d.date) })), name: name.value, nick: nick.value, kind: kind.value, phone: phone.value, whatsapp: wa.value, snap: snap.value, insta: ig.value, place: place.value, birthday: bp, every: +every.value || 0, notes: notes.value, rotaKey, sched, weeklyOff: [...weekly], hours, fav: fav.checked };
     const clash = rotaKey && F.friendList(S()).find(x => x.rotaKey === rotaKey && x.id !== f?.id); if (clash) return toast(`That rota row is already ${F.shortName(clash)}'s`, 'err');
     const dropped = [[snap, 'Snapchat'], [ig, 'Instagram']].filter(([el]) => el.value.trim() && !F.cleanHandle(el.value)).map(([, l]) => l);
     ctx.update(s => f ? F.updateFriend(s, f.id, data) : F.addFriend(s, data)); box.close(); if (dropped.length) toast(`${dropped.join(' and ')}: no username found, left empty`, 'err'); else if (!f) toast(`${data.nick || data.name} added`, 'ok'); };
-  const remove = () => { if (!confirm(`Remove ${f.name}?${f.rotaKey ? ' Their numbers stay on their colleague card.' : ''}`)) return; const prev = S().friends[f.id], prevC = S().contacts?.[f.rotaKey]; ctx.update(s => F.deleteFriend(s, f.id)); box.close(); toast(`${F.shortName(f)} removed`, '', { action: { label: 'Undo', run: () => ctx.update(s => { let x = ctx.revert(s, 'friends', 'friend', f.id, prev); if (f.rotaKey) x = ctx.revert(x, 'contacts', 'contact', f.rotaKey, prevC); return x; }) } }); };
+  const remove = () => { if (!confirm(`Remove ${f.name}?${f.rotaKey ? ' Their numbers stay on their colleague card.' : ''} Past outings keep their name.`)) return; const before = S(); ctx.update(s => F.deleteFriend(s, f.id)); box.close(); toast(`${F.shortName(f)} removed`, '', { action: { label: 'Undo', run: () => ctx.update(x => undoTo(x, before)) } }); };
   const box = ctx.sheet([h('h2', {}, f ? f.name : (v.kind === 'family' ? 'New family member' : 'New friend')), h('div', { class: 'grid2' }, field('Name', name), field('Nickname', nick)), h('div', { class: 'grid2' }, field('Type', kind), field('', h('label', { class: 'chip', style: { marginTop: '22px' } }, fav, ' ⭐ Favourite'))),
     h('div', { class: 'grid2' }, field('Phone', phone, phoneHint(phone)), field('WhatsApp', wa, phoneHint(wa))), h('div', { class: 'grid2' }, field('Snapchat', snap, handleHint(snap)), field('Instagram', ig, handleHint(ig))),
-    field('Their rota row', rotaBtn), paint, field('Area', place), h('div', { class: 'grid2' }, field('Birthday', bd), field('See them every (days, 0 = off)', every)), field('Notes (only on this card, never shared)', notes),
+    field('Their rota row', rotaBtn), paint, field('Area', place), h('div', { class: 'grid2' }, field('Birthday', bd), field('Keep in touch every (days, 0 = off)', every)), field('Other dates', datesBox), field('Notes (only on this card, never shared)', notes),
     h('div', { class: 'row wrap' }, h('button', { class: 'btn primary grow', onClick: save }, 'Save'), f ? h('button', { class: 'btn danger', onClick: remove }, 'Remove') : null)]);
   paintRota(); paintHours();
 }
@@ -161,7 +172,7 @@ export function daySheet(d, people = null) {
   ctx.sheet([h('h2', {}, `${dayLabel(d)}${r ? ` · ${r}` : ''}`),
     common?.window ? h('div', { class: 'cr-key soon' }, h('div', { class: 'grow' }, h('b', {}, common.all ? `Everyone free ${win(common.window)}` : `${common.free.length} of ${list.length} free with you ${win(common.window)}`), common.missing.length || common.unknown.length ? h('div', { class: 'tiny dim' }, [common.missing.length ? `not free: ${common.missing.map(nm).join(', ')}` : '', common.unknown.length ? `no info: ${common.unknown.map(nm).join(', ')}` : ''].filter(Boolean).join(' · ')) : null), list.length && common.free.length ? h('button', { class: 'btn sm', onClick: () => { closeSheets(); inviteSheet(common.free.filter(f => S().friends?.[f.id]).map(f => f.id), { date: d, key: keyOf(d), window: common.window, who: common.free.map(f => f.id) }); } }, 'Invite') : null)
       : h('div', { class: 'small muted' }, past ? 'Nothing left today that suits you all.' : 'No time when you are all free that day.'),
-    outs.length ? h('div', { class: 'list', style: { margin: '8px 0' } }, outs.map(o => h('div', { class: 'item clickable', onClick: () => { closeSheets(); outingSheet(o); } }, h('div', { class: 'grow' }, h('div', { class: 'name' }, `${o.planned ? '📅' : '✓'} ${o.what || 'Meet-up'}${o.start != null ? ` · ${F.hhmm(o.start)}` : ''}`), h('div', { class: 'meta' }, o.who.map(nameOf).join(', ')))))) : null,
+    outs.length ? h('div', { class: 'list', style: { margin: '8px 0' } }, outs.map(o => h('div', { class: 'item clickable', onClick: () => { closeSheets(); outingSheet(o); } }, h('div', { class: 'grow' }, h('div', { class: 'name' }, `${o.planned ? '📅' : '✓'} ${o.what || 'Meet-up'}${o.start != null ? ` · ${F.hhmm(o.start)}` : ''}`), h('div', { class: 'meta' }, o.who.map(w => nameOf(w, o)).join(', ')))))) : null,
     ev ? h('div', { class: 'tiny dim' }, `${ev} event${ev > 1 ? 's' : ''} in your calendar already taken out of your free time.`) : null,
     h('div', { class: 'dl' }, h('div', { class: 'dl-axis' }, h('span', {}), h('div', {}, ['08', '12', '16', '20', '24'].map(t => h('small', {}, t)))), line('You', me, stateText(me, me.windows), !!common?.me && !!common?.window), st.map(({ f, x }) => line(nm(f), x, stateText(x, x.windows), !!common?.free.includes(f))))]);
 }
@@ -218,12 +229,16 @@ function bestCard(n = 5, daysAhead = 21) {
   return h('div', { class: 'card' }, h('div', { class: 'title' }, 'Best times to meet'), list.length ? list.map(m => meetCard(m)) : h('div', { class: 'small muted' }, 'No overlap yet. Link friends to their rota row, or enter their days off, and the best slots appear here.'));
 }
 function nudgeCard() {
-  const s = S(), od = F.friendList(s).map(f => ({ f, d: F.overdue(s, f) })).filter(x => x.d > 0).sort((a, b) => b.d - a.d).slice(0, 4), bd = F.birthdays(s, new Date(), 21).slice(0, 4), tn = X.treatNudge(s);
-  if (!od.length && !bd.length && !tn?.due) return null;
+  const s = S(), od = F.friendList(s).map(f => ({ f, d: F.overdue(s, f) })).filter(x => x.d > 0).sort((a, b) => b.d - a.d), bd = F.birthdays(s, new Date(), 21).slice(0, 5), tn = X.treatNudge(s);
+  const bal = Object.entries(F.balances(s)).filter(([id]) => s.friends?.[id]);
+  if (!od.length && !bd.length && !tn?.due && !bal.length) return null;
+  const when = (b) => b.inDays === 0 ? 'today' : b.inDays === 1 ? 'tomorrow' : `${dayLabel(b.date)}, in ${days(b.inDays)}`;
   return h('div', { class: 'card' }, h('div', { class: 'title' }, 'Don’t let it slip'),
-    bd.map(b => h('div', { class: 'row nudge' }, h('span', { class: 'ch-ic sm' }, '🎂'), h('div', { class: 'grow' }, h('div', { class: 'name' }, b.name, b.age ? h('span', { class: 'dim' }, ` turns ${b.age}`) : null), h('div', { class: 'tiny dim' }, b.inDays === 0 ? 'Birthday today' : `Birthday ${dayLabel(b.date)} · in ${days(b.inDays)}`)),
-      b.friend ? reachMini(b.friend) : null, b.friend ? h('button', { class: 'btn sm', onClick: () => inviteSheet([b.friend.id], null, `Surprise for ${b.name}’s birthday`) }, 'Plan') : h('button', { class: 'btn sm ghost', onClick: () => ctx.personSheet(b.key) }, 'Card'))),
-    od.map(({ f, d }) => h('div', { class: 'row nudge' }, av(f), h('div', { class: 'grow' }, h('div', { class: 'name' }, F.shortName(f)), h('div', { class: 'tiny dim' }, `${F.lastSeen(s, f.id) ? `last seen ${relDay(fromKey(F.lastSeen(s, f.id)))}` : 'not seen yet'} · ${d > 60 ? 'long overdue' : `${days(d)} overdue`} (every ${f.every}d)`)), reachMini(f), h('button', { class: 'btn sm', onClick: () => inviteSheet([f.id]) }, 'Invite'))),
+    bd.map(b => h('div', { class: 'row nudge' }, b.friend ? av(b.friend, { size: 36 }) : h('span', { class: 'ch-ic sm' }, '🎂'), h('div', { class: 'grow' }, h('div', { class: 'name' }, b.birthday ? `${b.name}’s birthday` : `${b.name}: ${b.label}`, b.age ? h('span', { class: 'dim' }, b.birthday ? ` (turns ${b.age})` : ` (${b.age} years)`) : null), h('div', { class: 'tiny dim' }, when(b))),
+      b.friend ? reachMini(b.friend) : null, b.friend ? h('button', { class: 'btn sm', onClick: () => PU.profileSheet(b.friend) }, 'Open') : h('button', { class: 'btn sm ghost', onClick: () => ctx.personSheet(b.key) }, 'Card'))),
+    bal.slice(0, 3).map(([id, v]) => { const f = s.friends[id]; return h('div', { class: 'row nudge' }, av(f, { size: 36 }), h('div', { class: 'grow' }, h('div', { class: 'name' }, F.shortName(f)), h('div', { class: `tiny ${v > 0 ? 'ok' : 'late'}` }, v > 0 ? `owes you ${Math.round(v * 100) / 100} SAR` : `you owe ${Math.round(-v * 100) / 100} SAR`)), h('button', { class: 'btn sm', onClick: () => PU.settleSheet(f) }, 'Settle')); }),
+    od.slice(0, 4).map(({ f, d }) => { const lc = F.lastContact(s, f.id); return h('div', { class: 'row nudge' }, av(f, { size: 36 }), h('div', { class: 'grow' }, h('div', { class: 'name' }, F.shortName(f)), h('div', { class: 'tiny dim' }, `${lc ? `last in touch ${relDay(fromKey(lc))}` : 'not in touch yet'}, ${d > 60 ? 'long overdue' : `${days(d)} overdue`}`)), reachMini(f), h('button', { class: 'btn sm ghost', title: 'Log a call or message', onClick: () => { ctx.update(x => F.logTouch(x, { who: [f.id], kind: 'call' })); toast(`Logged: in touch with ${F.shortName(f)} today`, 'ok', { action: { label: 'Details', run: () => PU.touchSheet([f.id]) } }); } }, 'Talked'), h('button', { class: 'btn sm', onClick: () => inviteSheet([f.id]) }, 'Invite')); }),
+    od.length > 4 ? h('button', { class: 'btn sm ghost', onClick: () => { ctx.go('people'); } }, `${od.length - 4} more overdue`) : null,
     tn?.due ? h('div', { class: 'row nudge' }, h('span', { class: 'ch-ic sm' }, '🍰'), h('div', { class: 'grow' }, h('div', { class: 'name' }, 'Treat for the team?'), h('div', { class: 'tiny dim' }, `${days(tn.since)} since the last one (usually every ${tn.usual})`)), h('button', { class: 'btn sm', onClick: () => ctx.go('plans') }, 'Log')) : null);
 }
 
@@ -235,13 +250,16 @@ export function inviteSheet(ids, meet = null, what = '') {
   const fmtDay = (d) => `${DAY_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
   const rebuildMsg = (force = false) => { if (touched && !force) return; touched = false; msgBox.value = choice.length ? F.inviteText({ names: [...sel].map(nameOf), choices: choice, what: idea, fmtDay, fmtT: F.hhmm }) : `Hey ${[...sel].map(nameOf).join(', ') || 'everyone'}! ${idea ? idea + '? ' : ''}When are you free?`; };
   const saveBtn = h('button', { class: 'btn primary grow', onClick: async () => {
-    const c = choice[0]; if (!c || !sel.size) return toast(sel.size ? 'Tick a time first' : 'Pick at least one friend', 'err');
-    const who = [...sel], k = c.key || keyOf(c.date), title = `${idea || 'Meet up'} with ${who.map(nameOf).join(', ')}`;
-    ctx.update(x => F.logOuting(x, { date: k, who, what: idea, planned: true, start: c.window[0] })); box.close();
-    try { const r = await ctx.addEvent({ title, date: k, start: c.window[0], minutes: Math.min(120, c.window[1] - c.window[0]) });
-      toast(r === 'queued' ? 'Planned: it goes into your calendar when you are back online' : r === 'cal' ? 'Planned and added to your calendar' : 'Planned (sign in to Google to put it on your calendar)', 'ok'); }
-    catch { toast('Planned in Clementine (it could not be added to your calendar)', 'err'); } } }, 'Save as planned');
-  const syncSave = () => { saveBtn.disabled = !choice.length || !sel.size; };
+    if (!choice.length || !sel.size) return toast(sel.size ? 'Tick a time first' : 'Pick at least one friend', 'err');
+    const who = [...sel];
+    if (choice.length > 1) {   // several times offered: keep them as a poll and tick who says yes
+      ctx.update(x => X.savePoll(x, { title: idea || 'Meet up', who, slots: choice.map(c => ({ date: c.key || keyOf(c.date), start: c.window[0], end: Math.min(c.window[1], c.window[0] + 180) })) }));
+      box.close(); toast('Saved as a poll in Plans: tick who says yes', 'ok', { action: { label: 'Open', run: () => ctx.go('plans') } }); return;
+    }
+    const c = choice[0], k = c.key || keyOf(c.date);
+    planOuting({ who, date: k, start: c.window[0], minutes: Math.min(120, c.window[1] - c.window[0]), what: idea }); box.close(); } }, 'Save as planned');
+  const syncLabel = () => { saveBtn.textContent = choice.length > 1 ? `Save ${choice.length} times as a poll` : 'Save as planned'; };
+  const syncSave = () => { saveBtn.disabled = !choice.length || !sel.size; syncLabel(); };
   const paint = () => {
     const opts = meet ? [meet] : calc(); if (!meet && !choice.length) choice = opts.slice(0, 1);
     const ideas = ideasFor(), groups = F.groupList(S()).filter(g => g.members.length);
@@ -249,7 +267,7 @@ export function inviteSheet(ids, meet = null, what = '') {
       groups.length ? h('div', { class: 'chips', style: { marginBottom: '6px' } }, h('span', { class: 'tiny dim' }, 'Groups:'), groups.map(g => h('button', { class: 'chip', onClick: () => { for (const m of g.members) sel.add(m); if (!meet) choice = []; paint(); } }, `${g.icon || '👥'} ${g.name}`))) : null,
       fr.length ? h('div', { class: 'chips' }, fr.map(f => h('label', { class: `chip ${sel.has(f.id) ? 'sel' : ''}` }, h('input', { type: 'checkbox', checked: sel.has(f.id), style: { display: 'none' }, onChange: (e) => { e.target.checked ? sel.add(f.id) : sel.delete(f.id); if (!meet) choice = []; paint(); } }), F.shortName(f)))) : h('div', { class: 'small muted' }, 'Add some friends first (People tab).'),
       meet ? h('div', { class: 'small', style: { margin: '10px 0' } }, `${dayLabel(meet.date)} · ${win(meet.window)}`) : [h('div', { class: 'tiny dim', style: { margin: '10px 0 4px' } }, 'Times that suit everyone selected (tick the ones to offer)'),
-        opts.length ? opts.map(o => h('label', { class: 'item' }, h('input', { type: 'checkbox', checked: choice.some(c => c.key === o.key && c.window[0] === o.window[0]), onChange: (e) => { choice = e.target.checked ? [...choice, o] : choice.filter(c => c !== o && !(c.key === o.key && c.window[0] === o.window[0])); rebuildMsg(); syncSave(); } }), h('div', { class: 'grow' }, h('div', { class: 'name' }, dayLabel(o.date), ' · ', win(o.window)), h('div', { class: 'tiny dim' }, o.who.map(nameOf).join(', '))))) : h('div', { class: 'small muted' }, sel.size ? 'No time when you are all free in the next 3 weeks. Try Find a day, or a poll.' : 'Pick at least one friend.')],
+        opts.length ? opts.map(o => h('label', { class: 'item' }, h('input', { type: 'checkbox', checked: choice.some(c => c.key === o.key && c.window[0] === o.window[0]), onChange: (e) => { choice = e.target.checked ? [...choice, o] : choice.filter(c => c !== o && !(c.key === o.key && c.window[0] === o.window[0])); rebuildMsg(); syncSave(); } }), h('div', { class: 'grow' }, h('div', { class: 'name' }, dayLabel(o.date), ' · ', win(o.window)), h('div', { class: 'tiny dim' }, o.who.map(w => nameOf(w, o)).join(', '))))) : h('div', { class: 'small muted' }, sel.size ? 'No time when you are all free in the next 3 weeks. Try Find a day, or a poll.' : 'Pick at least one friend.')],
       h('div', { class: 'tiny dim', style: { margin: '10px 0 4px' } }, 'What to do'), h('div', { class: 'chips' }, ideas.map(i => h('button', { class: `chip ${idea === i.title ? 'sel' : ''}`, title: i.why, onClick: () => { idea = idea === i.title ? '' : i.title; paint(); if (touched) toast('Your own text is kept — tap “Fresh text” to rewrite it'); } }, `${i.icon} ${i.title}`))), idea ? h('div', { class: 'tiny dim' }, ideas.find(i => i.title === idea)?.why || '') : null,
       h('div', { style: { height: '10px' } }), msgBox,
       h('div', { class: 'row wrap', style: { marginTop: '6px', gap: '6px' } }, h('button', { class: 'btn sm ghost', onClick: () => rebuildMsg(true) }, '↺ Fresh text'), h('span', { class: 'grow' }), h('button', { class: 'btn sm', onClick: async () => { try { await navigator.clipboard.writeText(msgBox.value); toast('Message copied'); } catch { msgBox.select(); toast('Select and copy the message', 'err'); } } }, 'Copy')),
@@ -260,61 +278,131 @@ export function inviteSheet(ids, meet = null, what = '') {
   const box = ctx.sheet([h('h2', {}, 'Plan a meet-up'), body]); paint();
 }
 
-// ───────────── logging
+// ───────────── planning and logging
+/** Save a planned meet-up and put it on your calendar; the event id is kept so cancelling it removes the event too. */
+export async function planOuting({ who, date, start, minutes = 120, what = '', where = '', fromPoll = '' }) {
+  const id = 'o' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
+  ctx.update(x => F.logOuting(x, { id, date, who, what, where, planned: true, start, fromPoll }));
+  try {
+    const r = await ctx.addEvent({ title: `${what || 'Meet up'} with ${who.map(w => nameOf(w)).join(', ')}`, date, start, minutes, key: id });
+    if (r.id) ctx.update(x => x.outings?.[id] ? { ...x, outings: { ...x.outings, [id]: { ...x.outings[id], eventId: r.id, at: Date.now() } } } : x, { silent: true });
+    toast(r.status === 'queued' ? 'Planned: it goes into your calendar when you are back online' : r.status === 'cal' ? 'Planned and added to your calendar' : 'Planned (sign in to Google to put it on your calendar)', 'ok', { action: { label: 'Share card', run: () => CARD.shareOuting(S().outings[id], S()) } });
+  } catch { toast('Planned in Clementine (it could not be added to your calendar)', 'err'); }
+  return id;
+}
+/** A planned outing that will not happen: the record goes, and its calendar event with it. */
+function cancelOuting(o, label = 'Plan cancelled') {
+  const prev = S().outings[o.id]; ctx.update(x => F.deleteOuting(x, o.id)); if (o.eventId) ctx.removeEvent(o.eventId);
+  toast(`${label}${o.eventId ? ' and removed from your calendar' : ''}`, '', { action: { label: 'Undo', run: () => ctx.update(x => ctx.revert(x, 'outings', 'outing', o.id, prev)) } });
+}
+const people = (s) => [['me', 'You'], ...F.friendList(s).map(f => [f.id, F.shortName(f)])];
 export function outingSheet(o, preset = {}) {
-  const s = S(), fr = F.friendList(s), who = new Set(o?.who || preset.who || []), date = h('input', { type: 'date', value: o?.date || keyOf(new Date()) }), what = h('input', { value: o?.what || preset.what || '', placeholder: 'Dinner, padel, coffee…' }), where = h('input', { value: o?.where || preset.where || '', placeholder: 'Where' }), rating = h('select', {}, [0, 1, 2, 3, 4, 5].map(n => h('option', { value: n, selected: n === (o?.rating || 0) }, n ? '★'.repeat(n) : 'No rating'))), notes = h('textarea', { rows: 2 }, o?.notes || '');
+  const s = S(), fr = F.friendList(s), who = new Set(o?.who || preset.who || []), date = h('input', { type: 'date', value: o?.date || preset.date || keyOf(new Date()) }), what = h('input', { value: o?.what || preset.what || '', placeholder: 'Dinner, padel, coffee…' }), where = h('input', { value: o?.where || preset.where || '', placeholder: 'Where' }), rating = h('select', {}, [0, 1, 2, 3, 4, 5].map(n => h('option', { value: n, selected: n === (o?.rating || 0) }, n ? '★'.repeat(n) : 'No rating'))), notes = h('textarea', { rows: 2 }, o?.notes || '');
   const time = h('input', { type: 'time', value: o?.start != null ? F.hhmm(o.start) : '' });
+  // who brings what
+  const bring = (o?.bring || []).map(b => ({ ...b })), bringBox = h('div', { class: 'ob-list' });
+  const whoSel = (b) => h('select', { 'aria-label': `Who brings ${b.item || 'this'}`, onChange: (e) => { b.who = e.target.value; } }, h('option', { value: '' }, 'Anyone'), people(S()).map(([id, l]) => h('option', { value: id, selected: b.who === id }, l)));
+  const paintBring = () => bringBox.replaceChildren(...bring.map((b, i) => h('div', { class: 'ob-row' }, h('input', { type: 'checkbox', checked: b.done, 'aria-label': 'Sorted', onChange: (e) => { b.done = e.target.checked; } }), h('input', { value: b.item, placeholder: 'Drinks, dessert, charcoal…', 'aria-label': 'Item', onInput: (e) => { b.item = e.target.value; } }), whoSel(b), h('button', { type: 'button', class: 'btn sm ghost', 'aria-label': 'Remove item', onClick: () => { bring.splice(i, 1); paintBring(); } }, '✕'))),
+    h('button', { type: 'button', class: 'btn sm ghost', onClick: () => { bring.push({ item: '', who: '', done: false }); paintBring(); bringBox.querySelector('.ob-row:last-of-type input:not([type=checkbox])')?.focus(); } }, '＋ Add an item'));
+  paintBring();
+  // the bill
+  const c0 = o?.cost || null, total = h('input', { type: 'number', min: 0, step: '0.5', inputmode: 'decimal', value: c0?.total || '', placeholder: '0', 'aria-label': 'Total' });
+  const paidBy = h('select', { 'aria-label': 'Paid by' }, people(s).map(([id, l]) => h('option', { value: id, selected: (c0?.paidBy || 'me') === id }, l)));
+  const split = new Set(c0?.split || ['me', ...who]), splitBox = h('div', { class: 'chips' }), shareTxt = h('div', { class: 'tiny dim' });
+  const paintSplit = () => { splitBox.replaceChildren(...people(S()).filter(([id]) => id === 'me' || who.has(id) || split.has(id)).map(([id, l]) => h('button', { type: 'button', class: `chip ${split.has(id) ? 'sel' : ''}`, 'aria-pressed': String(split.has(id)), onClick: () => { split.has(id) ? split.delete(id) : split.add(id); paintSplit(); } }, l))); const t = +total.value || 0; shareTxt.textContent = t > 0 && split.size ? `${Math.round(t / split.size * 100) / 100} SAR each, ${split.size} people` : ''; };
+  total.addEventListener('input', paintSplit); paintSplit();
+  const whoChips = fr.length ? h('div', { class: 'chips' }, fr.map(f => h('label', { class: `chip ${who.has(f.id) ? 'sel' : ''}` }, h('input', { type: 'checkbox', checked: who.has(f.id), style: { display: 'none' }, onChange: (e) => { if (e.target.checked) { who.add(f.id); split.add(f.id); } else { who.delete(f.id); split.delete(f.id); } e.target.parentElement.classList.toggle('sel', e.target.checked); paintSplit(); } }), F.shortName(f)))) : h('div', { class: 'small muted' }, 'No friends yet — you can still log what you did.');
   const save = (asHappened = false) => {
     if (!who.size && !what.value.trim()) return toast('Pick who was there or say what you did', 'err');
     const t = new Date(), future = date.value > keyOf(t), [hh, mm] = time.value.split(':').map(Number), start = time.value ? hh * 60 + mm : null;
     const stillAhead = !asHappened && !!o?.planned && date.value === o.date && !F.outingDue({ ...o, start }, t);   // editing a plan for later today keeps it a plan
-    ctx.update(x => F.logOuting(x, { id: o?.id, date: date.value, who: [...who], what: what.value, where: where.value, rating: future ? 0 : +rating.value, notes: notes.value, planned: future || stillAhead, start, eventId: o?.eventId }, t)); box.close();
-    if (future) toast('That date is ahead, so it is saved as planned'); else if (o?.planned && !stillAhead) toast('Logged — last-seen dates updated', 'ok');
+    const cost = +total.value > 0 ? { total: +total.value, paidBy: paidBy.value, split: [...split], settled: (c0?.settled || []).filter(x => split.has(x)) } : null;
+    const moved = o?.eventId && (date.value !== o.date || start !== o.start);
+    ctx.update(x => F.logOuting(x, { ...(o || {}), id: o?.id, date: date.value, who: [...who], what: what.value, where: where.value, rating: future ? 0 : +rating.value, notes: notes.value, planned: future || stillAhead, start, eventId: moved ? '' : o?.eventId, bring, cost }, t)); box.close();
+    if (moved) { ctx.removeEvent(o.eventId); if (future || stillAhead) planCalendar(o.id); }
+    if (future && !o) toast('That date is ahead, so it is saved as planned'); else if (o?.planned && !stillAhead && !future) toast('Logged — last-seen dates updated', 'ok');
   };
-  const del = () => { const prev = S().outings[o.id]; ctx.update(x => F.deleteOuting(x, o.id)); box.close(); toast('Outing deleted', '', { action: { label: 'Undo', run: () => ctx.update(x => ctx.revert(x, 'outings', 'outing', o.id, prev)) } }); };
-  const box = ctx.sheet([h('h2', {}, o ? (o.planned ? 'Planned meet-up' : 'Edit outing') : 'Log an outing'), fr.length ? h('div', { class: 'chips' }, fr.map(f => h('label', { class: `chip ${who.has(f.id) ? 'sel' : ''}` }, h('input', { type: 'checkbox', checked: who.has(f.id), style: { display: 'none' }, onChange: (e) => { e.target.checked ? who.add(f.id) : who.delete(f.id); e.target.parentElement.classList.toggle('sel', e.target.checked); } }), F.shortName(f)))) : h('div', { class: 'small muted' }, 'No friends yet — you can still log what you did.'),
-    h('div', { class: 'grid2' }, field('Date', date), field('Time (optional)', time)), field('What', what), field('Where', where), field('How was it', rating), field('Notes', notes),
-    h('div', { class: 'row wrap' }, o?.planned && F.outingDue(o) ? h('button', { class: 'btn primary grow', onClick: () => save(true) }, 'Yes, it happened') : h('button', { class: 'btn primary grow', onClick: () => save() }, 'Save'), o ? h('button', { class: 'btn danger', onClick: del }, o.planned && F.outingDue(o) ? 'It didn’t happen' : 'Delete') : null)]);
+  const del = () => { box.close(); if (o.planned) cancelOuting(o, F.outingDue(o) ? 'Marked as not happened' : 'Plan cancelled'); else { const prev = S().outings[o.id]; ctx.update(x => F.deleteOuting(x, o.id)); toast('Outing deleted', '', { action: { label: 'Undo', run: () => ctx.update(x => ctx.revert(x, 'outings', 'outing', o.id, prev)) } }); } };
+  const box = ctx.sheet([h('h2', {}, o ? (o.planned ? 'Planned meet-up' : 'Outing') : 'Log an outing'), whoChips,
+    h('div', { class: 'grid2' }, field('Date', date), field('Time (optional)', time)), h('div', { class: 'grid2' }, field('What', what), field('Where', where)),
+    h('details', { class: 'ob-sec', open: bring.length ? '' : null }, h('summary', {}, 'Who brings what', bring.length ? h('span', { class: 'tiny dim' }, ` · ${bring.filter(b => b.done).length}/${bring.length} sorted`) : null), bringBox),
+    h('details', { class: 'ob-sec', open: c0 ? '' : null }, h('summary', {}, 'The bill', c0 ? h('span', { class: 'tiny dim' }, ` · ${c0.total} SAR`) : null), h('div', { class: 'grid2' }, field('Total (SAR)', total), field('Paid by', paidBy)), field('Split between', splitBox, shareTxt)),
+    field('How was it', rating), field('Notes', notes),
+    h('div', { class: 'row wrap' }, o?.planned && F.outingDue(o) ? h('button', { class: 'btn primary grow', onClick: () => save(true) }, 'Yes, it happened') : h('button', { class: 'btn primary grow', onClick: () => save() }, 'Save'),
+      o ? h('button', { class: 'btn', onClick: () => CARD.shareOuting(S().outings[o.id] || o, S()) }, 'Share card') : null,
+      o ? h('button', { class: 'btn danger', onClick: del }, o.planned ? (F.outingDue(o) ? 'It didn’t happen' : 'Cancel plan') : 'Delete') : null)]);
+}
+/** Put an existing planned outing (back) on the calendar after its time moved. */
+async function planCalendar(id) {
+  const o = S().outings?.[id]; if (!o || o.start == null) return;
+  try { const r = await ctx.addEvent({ title: `${o.what || 'Meet up'} with ${o.who.map(w => nameOf(w, o)).join(', ')}`, date: o.date, start: o.start, minutes: 120, key: id }); if (r.id) ctx.update(x => x.outings?.[id] ? { ...x, outings: { ...x.outings, [id]: { ...x.outings[id], eventId: r.id, at: Date.now() } } } : x, { silent: true }); } catch {}
 }
 
 // ───────────── screens
-export function friendCard(f) {
-  const s = S(), next = F.meetups(s, { ids: [f.id], busyOf, days: 21 })[0], ls = F.lastSeen(s, f.id), od = F.overdue(s, f), kindLabel = F.FRIEND_KINDS.find(k => k.id === f.kind)?.label;
-  const st = F.dayState(s, f, new Date()), relink = () => rotaPicker(f.rotaKey, (key) => { const clash = key && F.friendList(S()).find(x => x.rotaKey === key && x.id !== f.id); if (clash) return toast(`That rota row is already ${F.shortName(clash)}'s`, 'err'); ctx.update(x => F.updateFriend(x, f.id, { rotaKey: key })); toast(key ? `${F.shortName(f)} linked to ${rotaName(key)}` : `${F.shortName(f)} unlinked`); }, f.name.split(' ')[0]);
-  const manual = Object.keys(f.sched || {}).length > 0 || (f.weeklyOff || []).length > 0, b = f.birthday ? F.birthdays({ friends: { [f.id]: f } }, new Date(), 400)[0] : null;
-  return h('div', { class: 'card friend' }, h('div', { class: 'row' }, av(f), h('div', { class: 'grow' }, h('div', { class: 'name' }, f.nick && f.nick !== f.name ? `${f.nick} ` : '', f.nick && f.nick !== f.name ? h('span', { class: 'dim small' }, f.name) : f.name, f.fav ? ' ⭐' : ''), h('div', { class: 'tiny dim' }, [kindLabel, f.place, f.rotaKey ? `${R.UNIT_LABEL[R.unitOf(f.rotaKey)] || 'linked'} rota` : '', ls ? `seen ${relDay(fromKey(ls))}` : '', b ? `🎂 ${F.fmtBirthday(f.birthday)}${b.inDays === 0 ? ' (today!)' : b.inDays === 1 ? ' (tomorrow)' : b.inDays <= 30 ? ` (in ${days(b.inDays)})` : ''}` : ''].filter(Boolean).join(' · ')), f.notes ? h('div', { class: 'tiny fr-note' }, f.notes) : null), h('button', { class: 'btn sm ghost', 'aria-label': `Edit ${f.name}`, onClick: () => friendSheet(f) }, '⋯')),
-    reach(f, ''),
-    st.why && st.free === 'unknown' ? h('button', { class: 'chip pull', onClick: () => friendSheet(f) }, `${st.why}: not in the schedule — enter shifts`) : null,
-    !f.rotaKey && R.has() && ['gp', 'nurse', 'colleague'].includes(f.kind) && !manual ? h('button', { class: 'chip warn sc-link', onClick: relink }, 'Not linked to the roster — link') : null,
-    h('div', { class: 'row wrap fr-foot' }, next ? h('span', { class: 'chip sel' }, `Free together: ${dayLabel(next.date)} ${win(next.window)}`) : h('span', { class: 'chip' }, f.rotaKey || manual ? 'No shared time found' : 'No shift info yet'), od ? h('span', { class: 'chip late' }, od > 60 ? 'long overdue' : `${od}d overdue`) : null, h('button', { class: 'btn sm grow', onClick: () => inviteSheet([f.id]) }, 'Invite')));
+/** One friend as a row: ring, name, the one line that matters (overdue, birthday soon, next free time), WhatsApp. Tap = profile. */
+export function friendCard(f, { next = true } = {}) {
+  const s = S(), now = new Date(), od = F.overdue(s, f, now), kindLabel = F.FRIEND_KINDS.find(k => k.id === f.kind)?.label, lc = F.lastContact(s, f.id, now);
+  const b = F.birthdays({ friends: { [f.id]: f } }, now, 30)[0], nx = next ? F.meetups(s, { ids: [f.id], busyOf, days: 14 })[0] : null, bal = F.balances(s)[f.id] || 0;
+  const manual = Object.keys(f.sched || {}).length > 0 || (f.weeklyOff || []).length > 0, unlinked = !f.rotaKey && R.has() && ['gp', 'nurse', 'colleague'].includes(f.kind) && !manual;
+  const line = b ? h('span', { class: 'fr-hl' }, `${b.birthday ? '🎂 birthday' : b.label} ${b.inDays === 0 ? 'today' : b.inDays === 1 ? 'tomorrow' : `in ${days(b.inDays)}`}`)
+    : od ? h('span', { class: 'late' }, od > 60 ? 'long overdue' : `${days(od)} overdue`) : bal ? h('span', { class: bal > 0 ? 'ok' : 'late' }, bal > 0 ? `owes you ${Math.round(bal)} SAR` : `you owe ${Math.round(-bal)} SAR`)
+    : nx ? h('span', {}, `free together ${dayLabel(nx.date)} ${F.hhmm(nx.window[0])}`) : null;
+  return h('div', { class: 'fr-row', role: 'button', tabindex: '0', 'aria-label': `${f.name}: open`, onClick: (e) => { if (e.target.closest('a, .btn')) return; PU.profileSheet(f); }, onKeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) PU.profileSheet(f); } },
+    av(f, { size: 44 }), h('div', { class: 'grow fr-body' }, h('div', { class: 'name' }, f.nick || F.shortName(f), f.fav ? h('span', { class: 'fr-star', 'aria-label': 'favourite' }, ' ★') : null, f.nick && f.nick !== f.name ? h('span', { class: 'dim small' }, ` ${f.name}`) : null),
+      h('div', { class: 'tiny dim fr-meta' }, [kindLabel, lc ? `in touch ${relDay(fromKey(lc))}` : 'not in touch yet'].join(', ')), line ? h('div', { class: 'tiny fr-line' }, line) : null,
+      unlinked ? h('button', { class: 'chip warn sc-link', onClick: () => rotaPicker(f.rotaKey, (key) => { const clash = key && F.friendList(S()).find(x => x.rotaKey === key && x.id !== f.id); if (clash) return toast(`That rota row is already ${F.shortName(clash)}'s`, 'err'); ctx.update(x => F.updateFriend(x, f.id, { rotaKey: key })); toast(key ? `${F.shortName(f)} linked to ${rotaName(key)}` : `${F.shortName(f)} unlinked`); }, f.name.split(' ')[0]) }, 'Link to their rota row') : null),
+    reachMini(f), h('span', { class: 'fr-go', 'aria-hidden': 'true' }, '›'));
 }
-const FRIENDS_PAGE = 40;
+const FRIENDS_PAGE = 60;
 export function friendsList(list) {
   const shown = showAllFriends ? list : list.slice(0, FRIENDS_PAGE);
-  return [...shown.map(f => safe(f.name, () => friendCard(f))), list.length > shown.length ? h('button', { class: 'btn ghost', onClick: () => { showAllFriends = true; ctx.render(); } }, `Show all ${list.length}`) : null];
+  return [h('div', { class: 'card fr-list' }, shown.map(f => safe(f.name, () => friendCard(f, { next: list.length <= 25 })))), list.length > shown.length ? h('button', { class: 'btn ghost', onClick: () => { showAllFriends = true; ctx.render(); } }, `Show all ${list.length}`) : null];
 }
 
-/** Today: what is coming, who you could see, what is waiting on you. */
+/** This week at a glance: a column per day with your shift and the faces free with you. */
+function weekStrip(s, now) {
+  const start = startOfDay(now), fr = F.friendList(s), minMeet = F.timing().minMeet;
+  const cols = Array.from({ length: 7 }, (_, i) => addDays(start, i)).map(d => {
+    const me = F.meState(s, d, busyOf(d)), wins = F.clipToNow(me.windows, d, now);
+    const with_ = wins.length ? fr.filter(f => F.dayState(s, f, d).windows.some(w => wins.some(m => Math.min(m[1], w[1]) - Math.max(m[0], w[0]) >= minMeet))) : [];
+    const lab = me.status === 'work' ? (me.type === 'N' || me.end > 1440 ? 'Night' : 'Day') : me.status === 'leave' ? 'Leave' : me.status === 'off' ? (me.afterNight ? 'Sleep' : 'Off') : '—';
+    return h('button', { class: `cw-d ${me.status} ${me.afterNight ? 'post' : ''} ${+d === +start ? 'today' : ''} ${[5, 6].includes(d.getDay()) ? 'we' : ''}`, 'aria-label': `${dayLabel(d)}: ${lab}, ${with_.length} free with you`, onClick: () => daySheet(d) },
+      h('small', {}, DAY_SHORT[d.getDay()]), h('b', {}, d.getDate()), h('span', { class: 'cw-s' }, lab),
+      h('span', { class: 'cw-faces' }, with_.slice(0, 3).map(f => h('i', { style: { '--h': PU.hueOf(f.name) }, title: F.shortName(f) }, F.shortName(f)[0])), with_.length > 3 ? h('em', {}, `+${with_.length - 3}`) : null));
+  });
+  return h('div', { class: 'cw', role: 'group', 'aria-label': 'This week' }, cols);
+}
+
+/** Today: who you could see, what is coming, what is waiting on you. */
 export function renderToday() {
   freshBusy();
   const s = S(), now = new Date(), fr = F.friendList(s), up = HUB.upcoming(s, now), due = F.outingList(s).filter(o => F.outingDue(o, now));
-  const out = [h('h1', {}, 'Today')];
-  if (!fr.length && !Object.keys(s.contacts || {}).length) out.push(h('div', { class: 'card hero' }, h('div', { class: 'eyebrow' }, 'Welcome to Clementine'), h('div', { class: 'title' }, 'Your people, and when you can see them'),
-    h('p', { class: 'small muted' }, 'Clementine keeps every contact card (friends, family, colleagues, nurses) and works out who is free around your shifts. Who works when comes from Mandarin; your friends come over from Citrus the first time you sign in.'),
-    h('div', { class: 'row wrap' }, h('button', { class: 'btn primary grow', onClick: () => friendSheet(null) }, '+ Add a friend'), h('button', { class: 'btn grow', onClick: () => friendSheet(null, { kind: 'family', every: 7 }) }, '+ Family'), contactsButton(), ctx.signedIn() ? null : h('button', { class: 'btn grow', onClick: () => ctx.go('more') }, 'Sign in with Google'))));
-  if (due.length) out.push(h('div', { class: 'card warn' }, h('div', { class: 'title' }, 'Did these happen?'), due.slice(0, 4).map(o => h('div', { class: 'row nudge' }, h('span', { class: 'ch-ic sm' }, '📅'), h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up'), h('div', { class: 'tiny dim' }, `${relDay(fromKey(o.date))}${o.start != null ? ` ${F.hhmm(o.start)}` : ''} · ${o.who.map(nameOf).join(', ') || 'solo'}`)),
-    h('button', { class: 'btn sm primary', onClick: () => { ctx.update(x => F.logOuting(x, { ...o, planned: false })); toast('Logged — last-seen dates updated', 'ok'); } }, 'Yes'), h('button', { class: 'btn sm ghost', onClick: () => outingSheet(o) }, 'Edit')))));
-  // tonight / today: who is free with you
-  const today = startOfDay(now), tw = F.freeWith(s, today, { busy: busyOf(today), now }), me = F.meState(s, today, busyOf(today)), mineLeft = F.clipToNow(me.windows, today, now);
-  if (fr.length) out.push(h('div', { class: 'card hero' }, h('div', { class: 'eyebrow' }, `${DAY_NAMES[now.getDay()]} · ${me.status === 'work' ? `you work ${F.hhmm(me.start % 1440)}–${F.hhmm(me.end % 1440)}` : me.status === 'off' ? (me.afterNight ? 'off after a night' : 'your day off') : me.status === 'leave' ? 'on leave' : 'no rota for today'}`),
-    h('div', { class: 'title' }, !mineLeft.length ? 'No free time left today' : tw.length ? `Free with you today: ${tw.slice(0, 4).map(x => F.shortName(x.f)).join(', ')}${tw.length > 4 ? ` +${tw.length - 4}` : ''}` : `You are free ${mineLeft.map(win).join(', ')}`),
-    tw.length ? h('div', { class: 'list' }, tw.slice(0, 5).map(x => h('div', { class: 'row nudge' }, av(x.f), h('div', { class: 'grow' }, h('div', { class: 'name' }, F.shortName(x.f)), h('div', { class: 'tiny dim' }, `${win(x.window)}${x.overdue ? ` · ${x.overdue}d overdue` : ''}`)), reachMini(x.f), h('button', { class: 'btn sm', onClick: () => inviteSheet([x.f.id], { date: today, key: keyOf(today), window: x.window, who: [x.f.id] }) }, 'Invite')))) : mineLeft.length ? h('div', { class: 'small muted' }, 'None of your friends is free at the same time today.') : null));
-  if (up.length) out.push(h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'title grow' }, 'Coming up'), h('button', { class: 'btn sm ghost', onClick: () => ctx.go('outings') }, 'All')), up.slice(0, 4).map(o => h('div', { class: 'item clickable', onClick: () => outingSheet(o) }, h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up'), h('div', { class: 'meta' }, `${relDay(fromKey(o.date))}${o.start != null ? ` ${F.hhmm(o.start)}` : ''} · ${o.who.map(nameOf).join(', ')}`))))));
-  out.push(safe('Reminders', nudgeCard));
+  const today = startOfDay(now), me = F.meState(s, today, busyOf(today)), mineLeft = F.clipToNow(me.windows, today, now), tw = F.freeWith(s, today, { busy: busyOf(today), now });
+  const myDay = me.status === 'work' ? `you work ${F.hhmm(me.start % 1440)}–${F.hhmm(me.end % 1440)}${me.type === 'N' || me.end > 1440 ? ' tonight' : ''}` : me.status === 'off' ? (me.afterNight ? 'off, after your night' : 'your day off') : me.status === 'leave' ? 'on leave' : R.has() ? 'no rota for today' : '';
+  const out = [h('header', { class: 'td-head' }, h('h1', {}, 'Today'), h('p', { class: 'td-sub' }, `${DAY_NAMES[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]}${myDay ? `, ${myDay}` : ''}`))];
+  if (!fr.length && !Object.keys(s.contacts || {}).length) {
+    out.push(h('div', { class: 'card td-hero' }, h('div', { class: 'title' }, 'Your people, and when you can see them'),
+      h('p', { class: 'small muted' }, 'Add the people you keep up with. Colleagues linked to their rota row show their shifts by themselves (from Mandarin); your friends come over from Citrus the first time you sign in.'),
+      h('div', { class: 'row wrap' }, h('button', { class: 'btn primary grow', onClick: () => friendSheet(null) }, 'Add a friend'), h('button', { class: 'btn grow', onClick: () => friendSheet(null, { kind: 'family', every: 7 }) }, 'Add family'), contactsButton(), ctx.signedIn() ? null : h('button', { class: 'btn grow', onClick: () => ctx.go('more') }, 'Sign in with Google'))));
+    return out;
+  }
+  // the hero: faces free with you today; each ring lights up for the share of the day you are both free
+  const span = Math.max(1, F.timing().late - F.timing().wake);
+  out.push(h('section', { class: 'card td-hero' },
+    h('div', { class: 'title' }, !mineLeft.length ? 'No free time left today' : tw.length ? `Free with you today` : `You are free ${mineLeft.map(win).join(', ')}`),
+    tw.length ? h('div', { class: 'td-faces' }, tw.slice(0, 12).map(x => h('button', { class: 'td-face', onClick: () => inviteSheet([x.f.id], { date: today, key: keyOf(today), window: x.window, who: [x.f.id] }), 'aria-label': `${x.f.name}, free with you ${win(x.window)}: invite` },
+      av(x.f, { size: 58, frac: (x.window[1] - x.window[0]) / span }), h('b', {}, F.shortName(x.f)), h('small', {}, `from ${F.hhmm(x.window[0])}`)))) : mineLeft.length ? h('div', { class: 'small muted' }, 'None of your friends is free at the same time today.') : null,
+    weekStrip(s, now)));
+  const deck = [];
+  if (due.length) deck.push(h('div', { class: 'card warn' }, h('div', { class: 'title' }, 'Did these happen?'), due.slice(0, 4).map(o => h('div', { class: 'row nudge' }, h('span', { class: 'ch-ic sm' }, '📅'), h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up'), h('div', { class: 'tiny dim' }, `${relDay(fromKey(o.date))}${o.start != null ? ` ${F.hhmm(o.start)}` : ''}, ${o.who.map(w => nameOf(w, o)).join(', ') || 'solo'}`)),
+    h('button', { class: 'btn sm primary', onClick: () => { ctx.update(x => F.logOuting(x, { ...o, planned: false })); toast('Logged — last-seen dates updated', 'ok', { action: { label: 'Rate it', run: () => outingSheet(S().outings[o.id]) } }); } }, 'Yes'), h('button', { class: 'btn sm ghost', onClick: () => cancelOuting(o, 'Marked as not happened') }, 'No')))));
+  if (up.length) deck.push(h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'title grow' }, 'Coming up'), h('button', { class: 'btn sm ghost', onClick: () => ctx.go('outings') }, 'All')), up.slice(0, 4).map(o => h('div', { class: 'item clickable td-up', onClick: () => outingSheet(o) }, h('div', { class: 'td-date' }, h('b', {}, fromKey(o.date).getDate()), h('small', {}, DAY_SHORT[fromKey(o.date).getDay()])), h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up', o.start != null ? h('span', { class: 'dim' }, ` ${F.hhmm(o.start)}`) : null), h('div', { class: 'meta' }, [o.who.map(w => nameOf(w, o)).join(', '), o.where, o.bring?.length ? `${o.bring.filter(b => !b.done).length} to bring` : ''].filter(Boolean).join(', ')))))));
+  deck.push(safe('Reminders', nudgeCard));
   const open = X.pollList(s).filter(p => p.status === 'open');
-  if (open.length) out.push(h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'title grow' }, 'Open polls'), h('button', { class: 'btn sm ghost', onClick: () => ctx.go('plans') }, 'Plans')), open.slice(0, 3).map(p => { const r = X.pollResult(p); return h('div', { class: 'row small', style: { padding: '4px 0' } }, h('b', { class: 'grow' }, p.title), h('span', { class: `chip ${r.everyone ? 'sel' : ''}` }, r.everyone ? 'everyone can' : `${r.answered.length}/${p.who.length} answered`)); })));
-  if (fr.length) out.push(safe('Best times', () => bestCard(3, 10)));
-  out.push(h('div', { class: 'row wrap' }, h('button', { class: 'btn grow', onClick: () => inviteSheet([]) }, '💬 Plan a meet-up'), h('button', { class: 'btn grow', onClick: () => outingSheet(null) }, '📝 Log an outing'), h('button', { class: 'btn grow', onClick: () => findSheet() }, '🔎 Find a day')));
+  if (open.length) deck.push(h('div', { class: 'card' }, h('div', { class: 'row' }, h('div', { class: 'title grow' }, 'Open polls'), h('button', { class: 'btn sm ghost', onClick: () => ctx.go('plans') }, 'Plans')), open.slice(0, 3).map(p => { const r = X.pollResult(p); return h('div', { class: 'row small', style: { padding: '4px 0' } }, h('b', { class: 'grow' }, p.title), h('span', { class: `chip ${r.everyone ? 'sel' : ''}` }, r.everyone ? 'everyone can' : `${r.answered.length}/${p.who.length} answered`)); })));
+  deck.push(safe('Best times', () => bestCard(3, 10)));
+  out.push(h('div', { class: 'deck' }, deck));
+  out.push(h('div', { class: 'td-acts' }, h('button', { class: 'btn', onClick: () => inviteSheet([]) }, '💬 Plan a meet-up'), h('button', { class: 'btn', onClick: () => PU.touchSheet() }, '📞 Log a call'), h('button', { class: 'btn', onClick: () => outingSheet(null) }, '📝 Log an outing'), h('button', { class: 'btn', onClick: () => PU.availabilitySheet() }, '🗓 Share my free time'), h('button', { class: 'btn', onClick: () => findSheet() }, '🔎 Find a day')));
   return out;
 }
 
@@ -329,15 +417,24 @@ export function renderFree() {
 }
 export const freePart = (p) => { if (p === 'family' || p === 'work' || p === 'grid') freeSeg = p; };
 
-/** Outings: coming up and the history (the last-seen log). */
+/** Outings: coming up, money, your year, and the history (the last-seen log, with calls and messages). */
 export function renderOutings() {
   const s = S(), list = F.outingList(s), now = new Date(), y = String(now.getFullYear()), today = keyOf(now);
   const up = list.filter(o => o.planned && !F.outingDue(o, now)).reverse(), past = list.filter(o => !(o.planned && !F.outingDue(o, now)));
-  const row = (o) => h('div', { class: 'item clickable', onClick: () => outingSheet(o) }, h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up', o.where ? ` · ${o.where}` : ''), h('div', { class: 'meta' }, `${relDay(fromKey(o.date))}${o.start != null ? ` ${F.hhmm(o.start)}` : ''} · ${o.who.map(nameOf).join(', ') || 'solo'}${o.rating ? ' · ' + '★'.repeat(o.rating) : ''}`)), o.planned ? h('span', { class: `chip ${F.outingDue(o, now) ? 'warn' : 'sel'}` }, F.outingDue(o, now) ? 'did it happen?' : 'planned') : null);
+  const row = (o) => h('div', { class: 'item clickable', onClick: () => outingSheet(o) }, h('div', { class: 'grow' }, h('div', { class: 'name' }, o.what || 'Meet-up', o.where ? h('span', { class: 'dim' }, `, ${o.where}`) : null), h('div', { class: 'meta' }, [`${relDay(fromKey(o.date))}${o.start != null ? ` ${F.hhmm(o.start)}` : ''}`, o.who.map(w => nameOf(w, o)).join(', ') || 'solo', o.rating ? '★'.repeat(o.rating) : '', o.cost ? `${o.cost.total} SAR` : ''].filter(Boolean).join(', '))), o.planned ? h('span', { class: `chip ${F.outingDue(o, now) ? 'warn' : 'sel'}` }, F.outingDue(o, now) ? 'did it happen?' : 'planned') : null);
+  const touchRow = (t) => h('div', { class: 'item clickable', onClick: () => PU.touchSheet([], t) }, h('div', { class: 'grow' }, h('div', { class: 'name' }, `${F.TOUCH_KINDS.find(k => k[0] === t.kind)?.[1] || '✨'} ${t.who.map(w => nameOf(w, t)).join(', ')}`), h('div', { class: 'meta' }, [relDay(fromKey(t.date)), t.note].filter(Boolean).join(', '))));
   const yr = past.filter(o => !o.planned && o.date.startsWith(y) && o.date <= today);
   const tops = (() => { const c = {}; for (const o of yr) for (const id of o.who) c[id] = (c[id] || 0) + 1; return Object.entries(c).filter(([id]) => s.friends?.[id]).sort((a, b) => b[1] - a[1]).slice(0, 5); })();
-  return [h('h1', {}, 'Outings'), h('div', { class: 'row wrap' }, h('button', { class: 'btn primary grow', onClick: () => outingSheet(null) }, 'Log an outing'), h('button', { class: 'btn grow', onClick: () => inviteSheet([]) }, 'Plan one')),
-    up.length ? h('div', { class: 'card' }, h('div', { class: 'title' }, 'Coming up'), h('div', { class: 'list' }, up.map(row))) : null,
-    yr.length ? h('div', { class: 'card' }, h('div', { class: 'title' }, `${y} so far`), h('div', { class: 'small' }, `${yr.length} meet-up${yr.length === 1 ? '' : 's'}`, tops.length ? ` · most with ${tops.map(([id, n]) => `${nameOf(id)} (${n})`).join(', ')}` : '')) : null,
-    h('div', { class: 'card' }, h('div', { class: 'title' }, 'History'), past.length ? [h('div', { class: 'list' }, past.slice(0, histN).map(row)), past.length > histN ? h('button', { class: 'btn sm ghost', onClick: () => { histN += 80; ctx.render(); } }, `Show more (${past.length - histN} older)`) : null] : h('div', { class: 'small muted' }, 'Nothing logged yet. Log a meet-up and the last-seen dates and keep-in-touch nudges work by themselves.'))];
+  const places = (() => { const c = {}; for (const o of yr) if (o.where) c[o.where] = (c[o.where] || 0) + 1; return Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 3); })();
+  const perMonth = Array.from({ length: 12 }, (_, m) => yr.filter(o => +o.date.slice(5, 7) === m + 1).length), maxM = Math.max(1, ...perMonth);
+  const bal = Object.entries(F.balances(s)).filter(([id]) => s.friends?.[id]).sort((a, b) => b[1] - a[1]);
+  const touches = F.touchList(s);
+  return [h('h1', {}, 'Outings'), h('div', { class: 'row wrap' }, h('button', { class: 'btn primary grow', onClick: () => outingSheet(null) }, 'Log an outing'), h('button', { class: 'btn grow', onClick: () => inviteSheet([]) }, 'Plan one'), h('button', { class: 'btn grow', onClick: () => PU.touchSheet() }, 'Log a call')),
+    h('div', { class: 'deck' },
+      up.length ? h('div', { class: 'card' }, h('div', { class: 'title' }, 'Coming up'), h('div', { class: 'list' }, up.map(row))) : null,
+      bal.length ? h('div', { class: 'card' }, h('div', { class: 'title' }, 'Money'), bal.map(([id, v]) => { const f = s.friends[id]; return h('div', { class: 'row nudge' }, av(f, { size: 34 }), h('div', { class: 'grow' }, h('div', { class: 'name' }, F.shortName(f)), h('div', { class: `tiny ${v > 0 ? 'ok' : 'late'}` }, v > 0 ? `owes you ${Math.round(v * 100) / 100} SAR` : `you owe ${Math.round(-v * 100) / 100} SAR`)), h('button', { class: 'btn sm', onClick: () => PU.settleSheet(f) }, 'Settle up')); })) : null,
+      yr.length ? h('div', { class: 'card' }, h('div', { class: 'title' }, `${y} so far`), h('div', { class: 'yr' }, perMonth.map((n, m) => h('div', { class: `yr-m ${m === now.getMonth() ? 'now' : ''}`, title: `${MONTHS[m]}: ${n}` }, h('i', { style: { height: `${Math.round(n / maxM * 100)}%` } }), h('small', {}, MONTHS[m][0])))),
+        h('div', { class: 'small' }, `${yr.length} meet-up${yr.length === 1 ? '' : 's'}, ${touches.filter(t => t.date.startsWith(y)).length} calls and messages`), tops.length ? h('div', { class: 'small muted' }, `Most with ${tops.map(([id, n]) => `${nameOf(id)} (${n})`).join(', ')}`) : null, places.length ? h('div', { class: 'small muted' }, `Favourite spots: ${places.map(([p, n]) => `${p} (${n})`).join(', ')}`) : null) : null),
+    h('div', { class: 'card' }, h('div', { class: 'title' }, 'History'), past.length ? [h('div', { class: 'list' }, past.slice(0, histN).map(row)), past.length > histN ? h('button', { class: 'btn sm ghost', onClick: () => { histN += 80; ctx.render(); } }, `Show more (${past.length - histN} older)`) : null] : h('div', { class: 'small muted' }, 'Nothing logged yet. Log a meet-up and the last-seen dates and keep-in-touch reminders work by themselves.')),
+    touches.length ? h('details', { class: 'card' }, h('summary', { class: 'title' }, `Calls and messages (${touches.length})`), h('div', { class: 'list' }, touches.slice(0, 60).map(touchRow))) : null];
 }

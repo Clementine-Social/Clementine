@@ -13,7 +13,7 @@ export const CONTRACT = 2;
 const days = (n) => `${n} day${n === 1 ? '' : 's'}`;
 const part = (m) => m < 12 * 60 ? 'morning' : m < 17 * 60 ? 'afternoon' : 'evening';
 const dayWord = (d, now) => { const n = Math.round((startOfDay(d) - startOfDay(now)) / 864e5); return n === 0 ? 'today' : n === 1 ? 'tomorrow' : DAY_SHORT[d.getDay()]; };
-const bdayWords = (b) => b.inDays === 0 ? `${b.name}'s birthday today` : `${b.name}'s birthday ${b.inDays === 1 ? 'tomorrow' : `in ${days(b.inDays)}`}`;
+const bdayWords = (b) => `${F.occasionName(b)} ${b.inDays === 0 ? 'today' : b.inDays === 1 ? 'tomorrow' : `in ${days(b.inDays)}`}`;
 
 /** The outings still to come (planned, not yet due), soonest first. */
 export function upcoming(s, now = new Date()) { return F.outingList(s).filter(o => o.planned && !F.outingDue(o, now)).reverse(); }
@@ -40,9 +40,11 @@ export function buildStatus(s, now = new Date(), { busyOf = () => [] } = {}) {
   for (const { p, r } of waiting.slice(0, 2)) pending.push(`Poll “${p.title}”: waiting on ${r.waiting.length}`);
   const tn = X.treatNudge(s, now); if (tn?.due) pending.push(`Team treat: ${days(tn.since)} since the last one`);
   // a birthday a few days ahead becomes a task Citrus can offer (stable id per person and year: never offered twice)
-  const inbox = soonB.slice(0, 6).map(b => ({ id: `bday-${String(b.key).replace(/[^\w:-]/g, '').slice(0, 40)}-${b.date.getFullYear()}`, type: 'task', title: `Wish ${b.name} a happy birthday${b.age ? ` (${b.age})` : ''}`, date: keyOf(b.date), minutes: 5, pri: 2, url: `${SITE_URL}?do=birthdays`, expires: keyOf(addDays(b.date, 1)) }));
+  const inbox = soonB.slice(0, 6).map(b => ({ id: `bday-${String(b.key).replace(/[^\w:-]/g, '').slice(0, 40)}-${b.date.getFullYear()}`, type: 'task', title: b.birthday ? `Wish ${b.name} a happy birthday${b.age ? ` (${b.age})` : ''}` : `${b.name}: ${b.label}${b.age ? ` (${b.age} years)` : ''}`, date: keyOf(b.date), minutes: 5, pri: 2, url: `${SITE_URL}?do=birthdays`, expires: keyOf(addDays(b.date, 1)) }));
   const y = String(now.getFullYear()), m = keyOf(now).slice(0, 7), t = keyOf(now), seen = F.outingList(s).filter(o => !o.planned && o.date <= t);
+  const touched = F.touchList(s).filter(x => x.date.startsWith(m)).length;
   const metrics = [
+    { key: 'touches-month', label: 'Calls and messages logged this month', value: touched, unit: 'touches', date: t },
     { key: 'outings-month', label: 'Meet-ups this month', value: seen.filter(o => o.date.startsWith(m)).length, unit: 'meet-ups', date: t },
     { key: 'outings-year', label: 'Meet-ups this year', value: seen.filter(o => o.date.startsWith(y)).length, unit: 'meet-ups', date: t },
     { key: 'friends-overdue', label: 'Friends overdue', value: od.length, goal: 0, unit: 'friends', date: t },
@@ -58,7 +60,7 @@ export function buildStatus(s, now = new Date(), { busyOf = () => [] } = {}) {
     { id: 'invite', label: 'Plan a meet-up', url: `${base}?do=invite`, icon: '💬', minutes: 5 },
     { id: 'log', label: 'Log an outing', url: `${base}?do=log`, icon: '📝', minutes: 2 },
     { id: 'birthdays', label: 'Birthdays', url: `${base}?do=birthdays`, icon: '🎂' },
-    { id: 'people', label: 'People', url: `${base}#people`, icon: '👥' },
+    { id: 'call', label: 'Log a call', url: `${base}?do=call`, icon: '📞', minutes: 1 },
   ];
   return {
     app: 'clementine', title: 'Clementine', icon: '🍊', color: '#ff6a3d', url: base, contract: CONTRACT,
@@ -67,10 +69,11 @@ export function buildStatus(s, now = new Date(), { busyOf = () => [] } = {}) {
     today: { date: t, done: !due.length },
     next, metrics, pending: pending.slice(0, 10), inbox, actions,
     extra: {
-      birthdays: bd.map(b => ({ name: b.name, date: keyOf(b.date), inDays: b.inDays, ...(b.age ? { age: b.age } : {}) })).slice(0, 8),
+      birthdays: bd.map(b => ({ name: b.name, label: b.label, birthday: b.birthday, date: keyOf(b.date), inDays: b.inDays, ...(b.age ? { age: b.age } : {}) })).slice(0, 8),
       upcoming: up.slice(0, 5).map(o => ({ date: o.date, ...(o.start != null ? { start: F.hhmm(o.start) } : {}), what: o.what || 'Meet-up', who: names(o.who) })),
       freeTonight: F.freeWith(s, startOfDay(now), { busy: busyOf(startOfDay(now)), now }).slice(0, 6).map(x => ({ name: F.shortName(x.f), from: F.hhmm(x.window[0]), to: F.hhmm(x.window[1]) })),
       overdue: od.slice(0, 5).map(x => ({ name: F.shortName(x.f), days: x.d })),
+      money: (() => { const b = F.balances(s); let owed = 0, owe = 0; for (const v of Object.values(b)) v > 0 ? owed += v : owe -= v; return { owedToYou: Math.round(owed), youOwe: Math.round(owe) }; })(),
       roster: R.has() ? R.updatedAt() : null,
     },
   };

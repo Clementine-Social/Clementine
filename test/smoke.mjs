@@ -36,7 +36,17 @@ for (const [w, hgt, time] of [[390, 844, '2026-11-16T09:30:00+03:00'], [320, 640
   await sheetCheck(() => p.click('#view-free button:has-text("Find a day")'), 'find a day');
   await sheetCheck(() => p.click('#view-free .meet button:has-text("Invite") >> nth=0'), 'invite');
   await p.click('nav.tabs button[data-view=people]'); await sleep(150);
-  await sheetCheck(() => p.click('#view-people .friend button[aria-label^="Edit"] >> nth=0'), 'friend editor');
+  await sheetCheck(() => p.click('#view-people .fr-row >> nth=0'), 'profile');
+  await p.click('#view-people .fr-row >> nth=0'); await sleep(400); await p.click('.sheet .pf-acts button:has-text("Edit")'); await sleep(400);
+  await clean(p, '.sheet', 'friend editor'); await p.screenshot({ path: `${shots}/${w}-friend-editor.png` }); await p.keyboard.press('Escape'); await sleep(350);
+  await p.click('nav.tabs button[data-view=today]'); await sleep(200);
+  await sheetCheck(() => p.click('#view-today .td-acts button:has-text("Log a call")'), 'log a call');
+  await sheetCheck(() => p.click('#view-today .td-acts button:has-text("Share my free time")'), 'share free time');
+  await sheetCheck(() => p.click('#view-today .td-face >> nth=0'), 'invite from a face').catch(() => {});
+  await p.click('nav.tabs button[data-view=outings]'); await sleep(200);
+  await sheetCheck(() => p.click('#view-outings .item.clickable >> nth=0'), 'outing sheet');
+  await sheetCheck(() => p.click('#view-outings button:has-text("Settle up") >> nth=0'), 'settle up');
+  await p.click('nav.tabs button[data-view=people]'); await sleep(200);
   await p.click('#view-people .seg button:has-text("Colleagues")'); await sleep(200);
   await sheetCheck(() => p.click('#view-people .pp-row >> nth=0'), 'colleague card');
   await p.click('nav.tabs button[data-view=plans]'); await sleep(150);

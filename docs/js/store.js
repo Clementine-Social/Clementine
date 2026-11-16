@@ -23,6 +23,7 @@ function defaults() {
     polls: {},                // id -> time poll sent to friends {title, slots[], who[], votes{}, status, chosen, at}
     wishlist: {},             // id -> place / trip / thing to try {name, kind, city, url, note, with[], done, at}
     treats: {},               // id -> something brought for the team {date, what, for, cost, at}
+    touches: {},              // id -> a call / message / visit {who[], kind, date, note, at}   keeping in touch without meeting
     deleted: {},              // tombstones 'friend:<id>' | 'contact:<key>' | 'outing:<id>' … -> time, so deletions survive merges
     stamps: {},               // edit times of values that have no `at` of their own: 'set:<k>'
     migrated: null,           // {from: 'citrus', at, counts} once the social parts of Citrus were taken over
@@ -36,11 +37,11 @@ function defaults() {
 // Map collections whose values are records (objects): collection -> tombstone prefix. The merge and the sanitizer both read this table,
 // so a collection added here is cleaned on load and merged record by record.
 export const RECORD_MAPS = {
-  friends: 'friend', contacts: 'contact', groups: 'group', outings: 'outing', polls: 'poll', wishlist: 'wish', treats: 'treat',
+  friends: 'friend', contacts: 'contact', groups: 'group', outings: 'outing', polls: 'poll', wishlist: 'wish', treats: 'treat', touches: 'touch',
 };
 // Fields the views use without checking (`.toLowerCase()`, `.filter()`): repaired to the right type rather than dropping the record.
 const FIELDS = {
-  friends: { name: 's' }, outings: { who: 'a', date: 's' }, polls: { slots: 'a', who: 'a' }, wishlist: { name: 's' }, treats: { what: 's', date: 's' }, groups: { members: 'a', name: 's' },
+  friends: { name: 's' }, touches: { who: 'a', date: 's' }, outings: { who: 'a', date: 's' }, polls: { slots: 'a', who: 'a' }, wishlist: { name: 's' }, treats: { what: 's', date: 's' }, groups: { members: 'a', name: 's' },
 };
 const CELL_MAPS = [];                            // id -> dateKey -> cell record
 const NUM_MAPS = ['deleted', 'stamps'];          // key -> number
@@ -69,6 +70,9 @@ export function sanitize(input, report = { fixed: 0, notes: [] }) {
     for (const [f, t] of Object.entries(FIELDS[k] || {})) if (t === 's' ? typeof r[f] !== 'string' : !Array.isArray(r[f])) { if (r === v) { r = { ...v }; fix(`${k}.${id}.${f}`, false); } r[f] = t === 's' ? str(r[f]) : []; }
     if (k === 'polls' && !(r.votes && typeof r.votes === 'object' && !Array.isArray(r.votes))) { if (r === v) r = { ...v }; r.votes = {}; fix(`${k}.${id}.votes`, false); }
     if (k === 'friends') for (const f of ['sched', 'hours']) if (r[f] !== undefined && !isObj(r[f])) { if (r === v) r = { ...v }; r[f] = {}; fix(`${k}.${id}.${f}`, false); }
+    if (k === 'friends') for (const f of ['dates', 'gifts']) if (r[f] !== undefined && !Array.isArray(r[f])) { if (r === v) r = { ...v }; r[f] = []; fix(`${k}.${id}.${f}`, false); }
+    if (k === 'outings') for (const f of ['bring']) if (r[f] !== undefined && !Array.isArray(r[f])) { if (r === v) r = { ...v }; r[f] = []; fix(`${k}.${id}.${f}`, false); }
+    if (k === 'outings' && r.cost !== undefined && !(isObj(r.cost) && Array.isArray(r.cost.split) && Array.isArray(r.cost.settled) && +r.cost.total > 0)) { if (r === v) r = { ...v }; delete r.cost; fix(`${k}.${id}.cost`, false); }
     if (k === 'friends' && r.weeklyOff !== undefined && !Array.isArray(r.weeklyOff)) { if (r === v) r = { ...v }; r.weeklyOff = []; fix(`${k}.${id}.weeklyOff`, false); }
     return r;
   });

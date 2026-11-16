@@ -7,7 +7,7 @@ import { mergeStates, sanitize } from './store.js';
 
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 export const TAKE = ['friends', 'contacts', 'outings', 'polls', 'wishlist', 'treats'];
-const TOMB = /^(friend|contact|outing|poll|wish|treat):/;
+const TOMB = /^(friend|contact|outing|poll|wish|treat|touch):/;
 
 /** The social part of a Citrus state, shaped as a Clementine state. → {part, counts} (part is null when there is nothing to take). */
 export function socialPart(citrus) {
