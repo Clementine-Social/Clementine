@@ -68,6 +68,7 @@ export function buildStatus(s, now = new Date(), { busyOf = () => [] } = {}) {
   ];
   return {
     app: 'clementine', title: 'Clementine', icon: '🍊', color: '#ff6a3d', url: base, contract: CONTRACT,
+    drive: { byTag: true },   // claude/drive-layout.md: every folder Clementine uses is found by its citrusApp tag, so Citrus may move them
     updatedAt: now.toISOString(),
     summary: bits.join(' · ').slice(0, 140),
     today: { date: t, done: !due.length },

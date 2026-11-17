@@ -18,7 +18,7 @@ import * as AV from './avatar.js';
 import { checkBackup, describeCounts } from './backup-check.js';
 import { h, toast, keyOf, fromKey, addDays, startOfDay, fmtDate, pad2, DAY_NAMES, MONTHS, uid } from './util.js';
 
-export const VERSION = '1.3.0';
+export const VERSION = '1.3.1';
 const CITRUS_URL = 'https://amaerys.github.io/citrus-maxima/';
 const MANDARIN_URL = 'https://mandarin-work.github.io/Mandarin/';
 
@@ -319,6 +319,9 @@ function classifyChanges(changes, w) {
     if (par.includes(w.me) && c.name === 'state.json' && (c.props?.rev || '') !== G.seenStateRev()) plan.state = true;
     if (w.mandarin && par.includes(w.mandarin) && c.name === 'shifts.json') plan.hub = true;
     if (par.includes(w.hub) && c.mimeType === 'application/vnd.google-apps.folder' && (c.name === 'mandarin' || c.name === 'citrus') && c.id !== w.mandarin && c.id !== w.citrus) return null;   // a folder Clementine reads appeared: full pass
+    // a folder tagged for an app Clementine reads, other than the one it knows (Citrus tagged it, or it is new): look again by tag
+    const tag = c.mimeType === 'application/vnd.google-apps.folder' && !c.trashed ? c.props?.citrusApp : '';
+    if ((tag === 'mandarin' && c.id !== w.mandarin) || (tag === 'citrus' && c.id !== w.citrus)) { G.forgetFolders(); return null; }
   }
   return plan;
 }

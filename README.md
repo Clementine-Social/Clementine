@@ -11,7 +11,7 @@ The people app of the citrus family, split out of Citrus Maxima on 16/11/2026. C
 
 ## How it fits with the other apps
 
-One Google Drive tree for every app (see `HUB.md` in Citrus). Clementine writes only `My Apps/hub/clementine/`:
+One Google Drive tree for every app (see `HUB.md` in Citrus). Clementine finds every folder by its `citrusApp` tag (claude/drive-layout.md), so Citrus can move them into `Citrus/…`; today its own is `My Apps/hub/clementine/`, later `Citrus/Life/People - Clementine/`. It writes only there:
 
 | File | For | What is in it |
 |---|---|---|

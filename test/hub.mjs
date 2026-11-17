@@ -107,5 +107,27 @@ check(!ea.friends.f2 && !eb.friends.f2, 'a friend removed on the phone stays rem
 const twins = g.tree().filter(l => /(status|state|contacts)\.json/.test(l) && !/backups|citrus|mandarin/.test(l));
 check(twins.length === new Set(twins).size, `no duplicate files (${twins.length})`);
 check(!A.p.errors.length && !B.p.errors.length, `no page errors${[...A.p.errors, ...B.p.errors].slice(0, 2).join(' | ')}`);
+
+// ── folders found by tag (claude/drive-layout.md): Clementine tags its own folder, says byTag, and follows Citrus's move
+const folderAt = (parts) => g.path(parts, false);
+const myOld = folderAt(['My Apps', 'hub', 'clementine']);
+check(g.files.get(myOld)?.appProperties?.citrusApp === 'clementine', 'Clementine tags its own folder');
+check(g.readJsonAt(['My Apps', 'hub', 'clementine'], 'status.json')?.drive?.byTag === true, 'status.json says drive.byTag');
+check(!g.files.get(folderAt(['My Apps', 'hub', 'mandarin'])).appProperties?.citrusApp, 'it never tags another app’s folder');
+// Citrus tags the others and moves everything into Citrus/…, renaming as it goes; My Apps goes to Archive
+const mv = (fid, parts, name) => { const f = g.files.get(fid), to = g.path(parts); f.parents = [to]; f.name = name; g.touch(f); };
+for (const app of ['mandarin', 'citrus']) { const f = g.files.get(folderAt(['My Apps', 'hub', app])); f.appProperties = { ...(f.appProperties || {}), citrusApp: app }; g.touch(f); }
+const mandOld = folderAt(['My Apps', 'hub', 'mandarin']), myApps = folderAt(['My Apps']);
+mv(myOld, ['Citrus', 'Life'], 'People - Clementine'); mv(mandOld, ['Citrus', 'Work'], 'Mandarin'); mv(myApps, ['Citrus', 'Archive'], 'My Apps (old layout)');
+// a fresh device finds everything by tag and creates no My Apps
+const C = await device('fresh after the move', { width: 390 }); await sync(C.p);
+const sc = await state(C.p);
+check(sc?.friends?.f1, 'a fresh device after the move finds Clementine’s state by tag');
+check(await C.p.evaluate(() => !window.__clementine.rt.hub.shiftsError), 'and Mandarin’s shifts by tag');
+check(!folderAt(['My Apps']) && ![...g.files.values()].some(f => f.name === 'clementine' && !f.trashed && f.mimeType.includes('folder')), 'no My Apps and no new clementine folder after the move');
+// the phone (old cached ids) keeps writing into the moved folder
+await A.p.evaluate(() => window.__clementine.store.update(s => ({ ...s, contacts: { ...s.contacts, 'id:5': { key: 'id:5', phone: '0588000555', at: Date.now() } } }))); await sleep(300); await sync(A.p);
+check(g.readJsonAt(['Citrus', 'Life', 'People - Clementine'], 'state.json')?.contacts?.['id:5'], 'a device with cached ids writes into the moved folder');
+check(!C.p.errors.length, `no page errors after the move${C.p.errors.slice(0, 2).join(' | ')}`);
 await browser.close(); server.close();
 if (bad()) { console.log(`${bad()} hub check(s) FAILED`); process.exit(1); }

@@ -2,7 +2,7 @@
   "name": "clementine",
   "private": true,
   "type": "module",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Clementine — Social & People: every contact card, who is free around your shifts, find a day, meet-ups, polls, wishlist, treats and birthdays. A PWA with no build step.",
   "scripts": { "test": "bash test/all.sh", "bump": "sh scripts-bump.sh" }
 }

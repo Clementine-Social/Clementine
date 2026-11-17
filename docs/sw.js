@@ -1,5 +1,5 @@
 // Clementine service worker: precached app shell, network-first with a short timeout, Google Fonts cached for offline.
-const CACHE = 'clementine-e2c209f7f5';
+const CACHE = 'clementine-99fdebe288';
 const FONTS = 'clementine-fonts-v1';   // kept across releases: font files are immutable, no need to fetch them again
 const FONT_CSS = 'https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Pixelify+Sans:wght@500;700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@500&display=swap';
 // Without these the app cannot start offline: install fails (and the old worker stays) if one is missing.

@@ -5,7 +5,8 @@
 // screen, but phones only let Google's window open inside a tap — so renewals happen on the next tap anywhere in the
 // app (see renewOnTap), never from a timer. The one-hour token lives in localStorage on this device only.
 //
-// Drive layout (HUB.md): My Apps/hub/clementine/{state,status,contacts}.json · My Apps/hub/clementine/backups/state-YYYY-MM-DD.json.
+// Drive layout (HUB.md, claude/drive-layout.md): Clementine's folder is found by its tag citrusApp='clementine' (today My Apps/hub/clementine,
+// later Citrus/Life/People - Clementine): {state,status,contacts}.json and backups/state-YYYY-MM-DD.json.
 // Clementine only READS other apps' files (mandarin/shifts.json for who works when, citrus/state.json once for the migration);
 // it never writes into another app's folder, and never touches My Apps/Rotas (Mandarin's).
 //
@@ -398,21 +399,65 @@ export async function changesSince(tokenStr, maxPages = 20) {
 
 // ════════════════════════════════════════ the hub
 export const APP = 'clementine';
-const P = (root) => ({ hub: [root, 'hub'], me: [root, 'hub', APP], backups: [root, 'hub', APP, 'backups'], other: (app) => [root, 'hub', app] });
+const P = (root) => ({ hub: [root, 'hub'], other: (app) => [root, 'hub', app] });   // the old layout, only a fallback now
+
+// ── folders found by tag (claude/drive-layout.md): every app folder carries appProperties.citrusApp = '<id>'. Citrus may move
+// and rename them into Citrus/…; the tag (and the folder id) survives that. Lookup: the tagged folder (oldest if twins) →
+// else the old path My Apps/hub/<id> → else, for Clementine's own folder only, create it there and tag it at once.
+// Clementine never creates a folder by path once a tagged one exists, never moves or renames its folder, and never tags
+// another app's folder (Citrus does that).
+export const BY_TAG = true;
+const tagInflight = new Map();
+export async function appFolder(root, app, { create = false } = {}) {
+  const key = `tag:${app}`;
+  if (ids[key] && await exists(ids[key])) return ids[key];
+  if (tagInflight.has(key)) return tagInflight.get(key);
+  const p = (async () => {
+    const qs = new URLSearchParams({ q: `mimeType = '${FOLDER}' and trashed = false and appProperties has { key='citrusApp' and value='${q(app)}' }`, fields: 'files(id,name,parents,createdTime)', pageSize: '20', spaces: 'drive' });
+    const found = ((await gfetch(`${DRIVE}/files?${qs}`)).files || []).sort((a, b) => (a.createdTime || '').localeCompare(b.createdTime || ''));
+    let id = found[0]?.id || null;
+    if (!id) {
+      id = await ensurePath(P(root).other(app), { create: create && app === APP });
+      if (id && app === APP) await gfetch(`${DRIVE}/files/${encodeURIComponent(id)}?fields=id`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appProperties: { citrusApp: APP } }) });
+    }
+    if (id) { ids[key] = id; verified.add(id); persistIds(); } else delete ids[key];
+    return id;
+  })().finally(() => tagInflight.delete(key));
+  tagInflight.set(key, p);
+  return p;
+}
+const myFolder = (root) => appFolder(root, APP, { create: true });
+/** A sub-folder of a folder found by id (backups/ inside Clementine's folder), created where missing. */
+const childInflight = new Map();
+async function childFolder(parentId, name, { create = true } = {}) {
+  const key = `child:${parentId}/${name}`;
+  if (ids[key] && await exists(ids[key])) return ids[key];
+  if (childInflight.has(key)) return childInflight.get(key);
+  const p = (async () => {
+    const found = (await list(parentId, { name, folders: true })).sort((a, b) => (a.createdTime || '').localeCompare(b.createdTime || ''));
+    const id = found[0]?.id || (create ? await mkdir(name, parentId) : null);
+    if (id) { ids[key] = id; verified.add(id); persistIds(); }
+    return id;
+  })().finally(() => childInflight.delete(key));
+  childInflight.set(key, p);
+  return p;
+}
+const backupsFolder = async (root, opts) => { const me = await myFolder(root); return me ? childFolder(me, 'backups', opts) : null; };
 
 /** Folder ids Clementine watches in the changes feed: its own folder, and the folders of the apps it reads (Mandarin, Citrus). */
 export async function watchedFolders(root) {
-  const [hub, me] = await Promise.all([ensurePath(P(root).hub), ensurePath(P(root).me)]);
-  const [mandarin, citrus] = await Promise.all([ensurePath(P(root).other('mandarin'), { create: false }), ensurePath(P(root).other('citrus'), { create: false })]);
-  return { hub, me, mandarin: mandarin || '', citrus: citrus || '' };
+  // hub is only looked up (never created: after the move My Apps must not come back)
+  const [hub, me] = await Promise.all([ensurePath(P(root).hub, { create: false }), myFolder(root)]);
+  const [mandarin, citrus] = await Promise.all([appFolder(root, 'mandarin'), appFolder(root, 'citrus')]);
+  return { hub: hub || '', me, mandarin: mandarin || '', citrus: citrus || '' };
 }
 
 /** Clementine's small public files in hub/clementine: status.json (what Citrus shows) and contacts.json (handles other apps read). */
-export async function writeOwnFile(root, name, obj, { omit = ['updatedAt'] } = {}) { const dir = await ensurePath(P(root).me); return putJson(dir, name, obj, { omit, healTwins: true }); }
+export async function writeOwnFile(root, name, obj, { omit = ['updatedAt'] } = {}) { const dir = await myFolder(root); return putJson(dir, name, obj, { omit, healTwins: true }); }
 
 /** Another app's JSON file, read only: hub/<app>/<name>. null when it is not there. Twins are left alone (not ours to tidy). */
 export async function readOtherFile(root, app, name) {
-  const dir = await ensurePath(P(root).other(app), { create: false }); if (!dir) return null;
+  const dir = await appFolder(root, app); if (!dir) return null;
   const { file } = await findFile(dir, name); if (!file) return null;
   const data = await readJsonFile(file);
   return data && typeof data === 'object' ? { data, modifiedTime: file.modifiedTime, id: file.id } : null;
@@ -421,7 +466,7 @@ export async function readOtherFile(root, app, name) {
 // ── Clementine's own state: read with its revision, written only if nobody else wrote it since
 let seenState = null;   // {id, rev, modifiedTime} of the state.json we last read or wrote
 export async function loadRemoteState(root) {
-  const dir = await ensurePath(P(root).me);
+  const dir = await myFolder(root);
   const { file, twins } = await findFile(dir, 'state.json');
   if (!file) { seenState = null; return null; }
   for (const t of twins) trash(t.id).catch(() => {});
@@ -446,7 +491,7 @@ export async function remoteStateMoved() {
   catch (e) { if (e.status === 404) return true; throw e; }
 }
 export async function saveRemoteState(root, state, { force = false } = {}) {
-  const dir = await ensurePath(P(root).me);
+  const dir = await myFolder(root);
   if (!force && await remoteStateMoved()) { const e = new GoogleError('Another device saved first.', { status: 409 }); e.conflict = true; throw e; }
   const rev = `${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 7)}`;
   const r = await putJson(dir, 'state.json', state, { props: { rev }, fileId: seenState?.id || null, always: force });
@@ -457,7 +502,7 @@ export function seenStateRev() { return seenState?.rev || ''; }
 
 // ── daily backups of state.json: hub/clementine/backups/state-YYYY-MM-DD.json, the newest 14 kept
 export async function backupDaily(root, state, dayKey) {
-  const dir = await ensurePath(P(root).backups);
+  const dir = await backupsFolder(root);
   const name = `state-${dayKey}.json`, size = JSON.stringify(state).length;
   // today's copy is taken again when the data has grown a lot since (the first sync of day one was an empty 717 B: beta T5-07)
   const had = +ids[`backup:${name}`] || 0;
@@ -474,12 +519,12 @@ export async function backupDaily(root, state, dayKey) {
 }
 /** A copy kept just before a risky step (migration, restore, replace): hub/clementine/backups/state-YYYY-MM-DD-before-<what>.json. */
 export async function backupBefore(root, state, what) {
-  const dir = await ensurePath(P(root).backups);
+  const dir = await backupsFolder(root);
   const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
   await putJson(dir, `state-${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}-before-${what}-${p2(d.getHours())}${p2(d.getMinutes())}.json`, state);
 }
 export async function listBackups(root) {
-  const dir = await ensurePath(P(root).backups, { create: false }); if (!dir) return [];
+  const dir = await backupsFolder(root, { create: false }); if (!dir) return [];
   return (await list(dir, { extra: "name contains 'state-'" })).sort((a, b) => b.name.localeCompare(a.name)).map(f => ({ id: f.id, name: f.name, date: f.name.slice(6, 16), size: +f.size || 0 }));
 }
 export async function readBackup(id) { return readJsonFile({ id }); }
